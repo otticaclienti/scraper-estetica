@@ -199,7 +199,7 @@ let REF = "main";            // branch dove gira il workflow (rilevato all'avvio
 let TOKEN = localStorage.getItem("ghToken") || "";
 
 const $ = s => document.querySelector(s);
-let power="massima", csvText=null, csvName="", siteCount=0, poller=null, lastRunId=null;
+let power="massima", csvText=null, csvName="", siteCount=0, poller=null, lastRunId=null, sawRunning=false;
 
 function toast(m){const t=$("#toast");t.textContent=m;t.classList.add("show");setTimeout(()=>t.classList.remove("show"),2600);}
 function gh(path, opts={}){
@@ -301,6 +301,7 @@ async function startRun(){
       $("#pfill").classList.add("anim");
       $("#rows").innerHTML="";
       $("#dlBtn").classList.add("hidden");
+      sawRunning=false;   // non considerare finito un risultato precedente
       $("#statusMsg").textContent="Avvio in corso… (può volerci qualche secondo)";
       $("#n2").classList.add("done"); $("#n2").textContent="✓";
       $("#progcard").scrollIntoView({behavior:"smooth"});
@@ -344,6 +345,12 @@ async function tick(){
   let prog=null;
   try{ const t=await readResultFile("progress.json"); if(t) prog=JSON.parse(t); }catch(e){}
   if(prog){
+    // ignora un risultato vecchio gia' "finito": aspetta che il NUOVO run parta
+    if(prog.running===true) sawRunning=true;
+    if(!sawRunning && (prog.finished || prog.running===false)){
+      $("#statusMsg").textContent="Avvio in corso… (può volerci un minuto)";
+      return;
+    }
     const pct = prog.total>0 ? Math.min(100,Math.round(prog.done/prog.total*100)) : 0;
     $("#pfill").style.width=pct+"%"; $("#pctTxt").textContent=pct+"%";
     $("#sDone").textContent=(prog.done||0).toLocaleString("it-IT");
@@ -352,7 +359,7 @@ async function tick(){
     $("#sMail").textContent=(prog.emails||0).toLocaleString("it-IT");
     if(prog.running && prog.done>0){ $("#statusMsg").textContent="Scraping in corso…"; }
     await refreshTable();
-    if(prog.finished || prog.running===false){ finish(prog); }
+    if(sawRunning && (prog.finished || prog.running===false)){ finish(prog); }
   } else {
     $("#statusMsg").textContent="In attesa che lo scraper parta sui server di GitHub…";
   }
@@ -399,7 +406,7 @@ async function checkRunningRun(){
   try{
     const t=await readResultFile("progress.json");
     if(t){ const p=JSON.parse(t);
-      if(p.running){ $("#progcard").classList.remove("hidden"); $("#liveTag").classList.remove("hidden");
+      if(p.running){ sawRunning=true; $("#progcard").classList.remove("hidden"); $("#liveTag").classList.remove("hidden");
         $("#pfill").classList.add("anim"); startPolling(); }
     }
   }catch(e){}
