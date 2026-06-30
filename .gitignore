@@ -1,0 +1,10 @@
+# Dati di input/output (di solito non vanno versionati)
+siti.csv
+emails.csv
+*.out.csv
+
+# Python
+__pycache__/
+*.pyc
+.venv/
+venv/
