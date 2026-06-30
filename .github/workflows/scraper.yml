@@ -80,6 +80,16 @@ jobs:
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
+          # RIPRESA: se esiste gia' un emails.csv dei giri precedenti, lo
+          # riusiamo cosi' lo scraper salta i siti gia' fatti (resume).
+          if curl -fsSL "https://raw.githubusercontent.com/${GITHUB_REPOSITORY}/risultati/emails.csv" -o emails.csv 2>/dev/null \
+              && [ "$(wc -l < emails.csv)" -gt 1 ]; then
+            echo "Riprendo: trovate $(($(wc -l < emails.csv) - 1)) righe gia' presenti."
+          else
+            printf 'sito,email,stato\n' > emails.csv
+            echo "Nessun risultato precedente: parto da zero."
+          fi
+
           PUB="$RUNNER_TEMP/pub"
           mkdir -p "$PUB"
           cd "$PUB"
@@ -88,8 +98,8 @@ jobs:
           git config user.email "scraper-bot@users.noreply.github.com"
           git remote add origin "https://x-access-token:${GITHUB_TOKEN}@github.com/${GITHUB_REPOSITORY}.git"
           git checkout -q --orphan risultati
+          cp -f "$GITHUB_WORKSPACE/emails.csv" emails.csv
           echo '{"running":true,"finished":false,"total":0,"done":0,"with_email":0,"emails":0}' > progress.json
-          printf 'sito,email,stato\n' > emails.csv
           git add -A
           git commit -q -m "avvio"
           git push -q -f origin risultati

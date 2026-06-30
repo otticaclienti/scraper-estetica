@@ -323,6 +323,7 @@ class Scraper:
         self.browser = None
         self._pw = None
         self.render_sem = asyncio.Semaphore(max(1, args.render_concurrency))
+        self._browser_lock = asyncio.Lock()
         self.ocr_executor = ThreadPoolExecutor(max_workers=args.ocr_workers) \
             if args.ocr else None
 
@@ -357,48 +358,62 @@ class Scraper:
     async def ensure_browser(self):
         if self.browser is not None:
             return
-        from playwright.async_api import async_playwright
-        self._pw = await async_playwright().start()
-        exe = find_chromium()
-        launch_args = ["--no-sandbox", "--disable-dev-shm-usage",
-                       "--disable-gpu", "--disable-blink-features=AutomationControlled"]
+        async with self._browser_lock:
+            if self.browser is not None:
+                return
+            from playwright.async_api import async_playwright
+            self._pw = await async_playwright().start()
+            exe = find_chromium()
+            launch_args = ["--no-sandbox", "--disable-dev-shm-usage",
+                           "--disable-gpu",
+                           "--disable-blink-features=AutomationControlled"]
+            try:
+                self.browser = await self._pw.chromium.launch(
+                    headless=True, args=launch_args,
+                    **({"executable_path": exe} if exe else {}),
+                )
+            except Exception:
+                self.browser = await self._pw.chromium.launch(
+                    headless=True, args=launch_args)
+
+    async def _render_page(self, ctx, url):
+        page = await ctx.new_page()
+        await page.goto(url, timeout=self.timeout * 1000,
+                        wait_until="domcontentloaded")
+        await page.wait_for_timeout(1500)
+        content = await page.content()
         try:
-            self.browser = await self._pw.chromium.launch(
-                headless=True, args=launch_args,
-                **({"executable_path": exe} if exe else {}),
-            )
+            hrefs = await page.eval_on_selector_all(
+                "a[href^='mailto:']",
+                "els => els.map(e => e.getAttribute('href'))")
+            content += "\n" + "\n".join(h or "" for h in hrefs)
         except Exception:
-            self.browser = await self._pw.chromium.launch(
-                headless=True, args=launch_args)
+            pass
+        return content
 
     async def render(self, url):
-        """Apre l'URL in un browser headless e ritorna l'HTML renderizzato."""
+        """Apre l'URL in un browser headless e ritorna l'HTML renderizzato.
+
+        Tutto e' protetto da timeout: nessun sito puo' bloccare il render
+        (e quindi gli altri worker) all'infinito."""
         async with self.render_sem:
+            ctx = None
             try:
-                await self.ensure_browser()
+                await asyncio.wait_for(self.ensure_browser(), timeout=60)
                 ctx = await self.browser.new_context(
                     user_agent=HEADERS["User-Agent"],
                     locale="it-IT", ignore_https_errors=True,
                 )
-                page = await ctx.new_page()
-                try:
-                    await page.goto(url, timeout=self.timeout * 1000,
-                                    wait_until="domcontentloaded")
-                    await page.wait_for_timeout(1500)
-                    content = await page.content()
-                    # prova a estrarre anche da link mailto via DOM
-                    try:
-                        hrefs = await page.eval_on_selector_all(
-                            "a[href^='mailto:']",
-                            "els => els.map(e => e.getAttribute('href'))")
-                        content += "\n" + "\n".join(h or "" for h in hrefs)
-                    except Exception:
-                        pass
-                    return content
-                finally:
-                    await ctx.close()
+                return await asyncio.wait_for(
+                    self._render_page(ctx, url), timeout=self.timeout + 10)
             except Exception:
                 return None
+            finally:
+                if ctx is not None:
+                    try:
+                        await asyncio.wait_for(ctx.close(), timeout=10)
+                    except Exception:
+                        pass
 
     # ---- OCR -----------------------------------------------------------
     def _ocr_sync(self, data):
@@ -597,19 +612,27 @@ def read_sites(path, column):
 
 
 def load_done(output_path):
+    """Ritorna (siti_gia_fatti, siti_con_email, email_totali) dall'output."""
     done = set()
+    with_email = set()
+    emails = 0
     if not os.path.exists(output_path):
-        return done
+        return done, 0, 0
     try:
         with open(output_path, newline="", encoding="utf-8") as f:
             reader = csv.reader(f)
             next(reader, None)
             for row in reader:
-                if row:
-                    done.add(row[0].strip().lower())
+                if not row:
+                    continue
+                site = row[0].strip().lower()
+                done.add(site)
+                if len(row) > 1 and row[1].strip():
+                    with_email.add(site)
+                    emails += 1
     except Exception:
         pass
-    return done
+    return done, len(with_email), emails
 
 
 class CsvSink:
@@ -653,7 +676,11 @@ async def worker(queue, scraper, session, sink, lock, counters, loop):
             queue.task_done()
             return
         try:
-            site, emails, status = await scraper.scrape_site(session, site, loop)
+            site, emails, status = await asyncio.wait_for(
+                scraper.scrape_site(session, site, loop),
+                timeout=scraper.args.site_timeout)
+        except asyncio.TimeoutError:
+            site, emails, status = site, set(), "timeout"
         except Exception as e:
             site, emails, status = site, set(), f"errore:{type(e).__name__}"
         async with lock:
@@ -680,7 +707,7 @@ async def run(args):
         print("Nessun sito trovato nel file di input.", file=sys.stderr)
         return 1
 
-    done = load_done(args.output)
+    done, done_with_email, done_emails = load_done(args.output)
     todo = [s for s in sites if s.strip().lower() not in done]
     print(f"Siti totali: {len(sites)} | gia' fatti: {len(done)} | "
           f"da processare: {len(todo)}", file=sys.stderr)
@@ -699,7 +726,9 @@ async def run(args):
     if new_file:
         sink.writerow(["sito", "email", "stato"])
 
-    counters = {"total": len(todo), "done": 0, "with_email": 0, "emails": 0,
+    # conteggi cumulativi: includono cio' che era gia' stato fatto (ripresa)
+    counters = {"total": len(sites), "done": len(done),
+                "with_email": done_with_email, "emails": done_emails,
                 "progress_file": args.progress_file}
     write_progress(args.progress_file, counters, running=True)
     lock = asyncio.Lock()
@@ -749,6 +778,8 @@ def main():
                    help="pagine massime per sito (default: 8)")
     p.add_argument("--progress-file", default=None,
                    help="scrive l'avanzamento in un file JSON (per la dashboard)")
+    p.add_argument("--site-timeout", type=int, default=90,
+                   help="tempo massimo per singolo sito in secondi (default: 90)")
     # render
     p.add_argument("--render", action="store_true",
                    help="attiva il rendering JavaScript (browser headless)")
