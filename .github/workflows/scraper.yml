@@ -29,6 +29,9 @@ on:
         required: true
         default: "15"
 
+permissions:
+  contents: write   # serve per pubblicare progresso e risultati sul branch "risultati"
+
 jobs:
   scrape:
     runs-on: ubuntu-latest
@@ -64,20 +67,66 @@ jobs:
           fi
           echo "Trovato il file: ${{ inputs.file_input }}"
 
-      - name: Esegui lo scraper
+      - name: Prepara il branch "risultati" (per la dashboard)
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
+          PUB="$RUNNER_TEMP/pub"
+          mkdir -p "$PUB"
+          cd "$PUB"
+          git init -q
+          git config user.name "scraper-bot"
+          git config user.email "scraper-bot@users.noreply.github.com"
+          git remote add origin "https://x-access-token:${GITHUB_TOKEN}@github.com/${GITHUB_REPOSITORY}.git"
+          git checkout -q --orphan risultati
+          echo '{"running":true,"finished":false,"total":0,"done":0,"with_email":0,"emails":0}' > progress.json
+          printf 'sito,email,stato\n' > emails.csv
+          git add -A
+          git commit -q -m "avvio"
+          git push -q -f origin risultati
+
+      - name: Esegui lo scraper (con pubblicazione live del progresso)
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          PUB="$RUNNER_TEMP/pub"
+
+          # committer in background: ogni 20s pubblica progresso e risultati parziali
+          (
+            while true; do
+              sleep 20
+              cp -f progress.json "$PUB/progress.json" 2>/dev/null || true
+              cp -f emails.csv "$PUB/emails.csv" 2>/dev/null || true
+              ( cd "$PUB" && git add -A && git commit -q -m "progresso" >/dev/null 2>&1 \
+                  && git push -q -f origin risultati >/dev/null 2>&1 ) || true
+            done
+          ) &
+          COMMITTER=$!
+
           EXTRA=""
           if [ "${{ inputs.potenza }}" = "massima" ]; then
             EXTRA="--render --ocr"
           fi
           echo "Modalita': ${{ inputs.potenza }}  (opzioni: $EXTRA)"
+          set +e
           python scraper.py \
             --input "${{ inputs.file_input }}" \
             --output emails.csv \
+            --progress-file progress.json \
             --concurrency "${{ inputs.concurrency }}" \
             --max-pages "${{ inputs.max_pages }}" \
             --timeout "${{ inputs.timeout }}" \
             $EXTRA
+          RC=$?
+          set -e
+
+          # ferma il committer e pubblica il risultato finale
+          kill $COMMITTER 2>/dev/null || true
+          cp -f progress.json "$PUB/progress.json" 2>/dev/null || true
+          cp -f emails.csv "$PUB/emails.csv" 2>/dev/null || true
+          ( cd "$PUB" && git add -A && git commit -q -m "risultato finale" >/dev/null 2>&1 \
+              && git push -q -f origin risultati >/dev/null 2>&1 ) || true
+          exit $RC
 
       - name: Riepilogo risultati
         if: always()

@@ -19,8 +19,9 @@ metodo è stata trovata: `statico`, `render`, `ocr`).
 
 | Modo | Per chi | Guida |
 |------|---------|-------|
-| 🖥️ **App visiva** (interfaccia nel browser, trascini la lista e vedi l'avanzamento live) | Chi vuole un vero "software" sul proprio PC | **[GUIDA-APP.md](GUIDA-APP.md)** |
-| ☁️ **Online con GitHub Actions** (gira sui server di GitHub, niente installazioni) | Chi non vuole installare nulla | **[GUIDA.md](GUIDA.md)** |
+| 🌐 **Dashboard** (un'unica pagina: carichi, avvii, vedi il progresso, scarichi — niente da installare, gira su GitHub Actions) | Chi vuole tutto da una pagina sola senza installare | **[GUIDA-DASHBOARD.md](GUIDA-DASHBOARD.md)** |
+| 🖥️ **App visiva** (interfaccia che gira sul tuo PC) | Chi preferisce avere tutto in locale | **[GUIDA-APP.md](GUIDA-APP.md)** |
+| ☁️ **GitHub Actions "a mano"** (dalla scheda Actions) | Chi non vuole nemmeno il token | **[GUIDA.md](GUIDA.md)** |
 | ⌨️ **Riga di comando** (vedi sotto) | Chi è pratico di terminale | questo file |
 
 Il resto di questo file documenta l'uso a riga di comando.

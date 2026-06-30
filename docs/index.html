@@ -1,0 +1,411 @@
+<!DOCTYPE html>
+<html lang="it">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Scraper Email — Dashboard</title>
+<style>
+  :root{
+    --bg:#0f1226; --bg2:#161a3a; --card:#1b2147; --card2:#232a5c;
+    --txt:#eef1ff; --muted:#9aa3d4; --line:#2c3470;
+    --accent:#6c8cff; --accent2:#8b5cff; --ok:#27d796; --warn:#ffd166; --err:#ff6b8b;
+  }
+  *{box-sizing:border-box}
+  body{margin:0;font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;
+    background:linear-gradient(135deg,#0f1226,#1a1140 60%,#0f1226);color:var(--txt);min-height:100vh}
+  .wrap{max-width:960px;margin:0 auto;padding:28px 20px 60px}
+  header{display:flex;align-items:center;gap:14px;margin-bottom:6px}
+  .logo{width:46px;height:46px;border-radius:13px;background:linear-gradient(135deg,var(--accent),var(--accent2));
+    display:flex;align-items:center;justify-content:center;font-size:24px;box-shadow:0 6px 24px rgba(108,140,255,.4)}
+  h1{font-size:24px;margin:0;font-weight:700;letter-spacing:.3px}
+  .sub{color:var(--muted);font-size:14px;margin:2px 0 24px 60px}
+  .card{background:linear-gradient(180deg,var(--card),var(--bg2));border:1px solid var(--line);
+    border-radius:18px;padding:22px;margin-bottom:20px;box-shadow:0 10px 40px rgba(0,0,0,.25)}
+  .step{display:flex;align-items:center;gap:10px;font-weight:600;margin-bottom:14px;font-size:15px}
+  .num{width:26px;height:26px;border-radius:50%;background:var(--accent);color:#fff;display:flex;
+    align-items:center;justify-content:center;font-size:14px;font-weight:700;flex:0 0 auto}
+  .num.done{background:var(--ok)}
+  .drop{border:2px dashed var(--line);border-radius:14px;padding:34px;text-align:center;cursor:pointer;
+    transition:.18s;background:rgba(255,255,255,.02)}
+  .drop:hover,.drop.over{border-color:var(--accent);background:rgba(108,140,255,.08)}
+  .drop .big{font-size:42px;margin-bottom:8px}
+  .drop .hint{color:var(--muted);font-size:13px;margin-top:6px}
+  .badge{display:inline-flex;align-items:center;gap:8px;background:rgba(39,215,150,.14);
+    color:var(--ok);border:1px solid rgba(39,215,150,.4);border-radius:10px;padding:8px 14px;font-weight:600;font-size:14px}
+  .row{display:flex;gap:16px;flex-wrap:wrap;align-items:center}
+  .opt{flex:1;min-width:200px}
+  label.lbl{display:block;color:var(--muted);font-size:13px;margin-bottom:8px;font-weight:600}
+  .seg{display:flex;background:var(--bg);border:1px solid var(--line);border-radius:12px;overflow:hidden}
+  .seg button{flex:1;background:none;border:none;color:var(--muted);padding:12px;font-size:14px;
+    cursor:pointer;font-weight:600;transition:.15s}
+  .seg button.on{background:linear-gradient(135deg,var(--accent),var(--accent2));color:#fff}
+  input[type=number],input[type=password],input[type=text]{width:100%;background:var(--bg);
+    border:1px solid var(--line);color:var(--txt);border-radius:12px;padding:12px;font-size:14px}
+  .caps{font-size:12.5px;color:var(--muted);margin-top:10px;line-height:1.6}
+  .btn{display:inline-flex;align-items:center;justify-content:center;gap:9px;border:none;border-radius:13px;
+    padding:14px 24px;font-size:15px;font-weight:700;cursor:pointer;transition:.15s;color:#fff;
+    background:linear-gradient(135deg,var(--accent),var(--accent2));box-shadow:0 8px 26px rgba(108,140,255,.4)}
+  .btn:hover{transform:translateY(-1px)} .btn:disabled{opacity:.45;cursor:not-allowed;transform:none}
+  .btn.ghost{background:transparent;border:1px solid var(--line);box-shadow:none;color:var(--txt)}
+  .btn.ok{background:linear-gradient(135deg,#27d796,#13b87a)}
+  .pbar{height:16px;background:var(--bg);border-radius:20px;overflow:hidden;border:1px solid var(--line)}
+  .pfill{height:100%;width:0;background:linear-gradient(90deg,var(--accent),var(--accent2),var(--ok));
+    border-radius:20px;transition:width .6s ease;background-size:200% 100%}
+  .pfill.anim{animation:flow 2s linear infinite}
+  @keyframes flow{to{background-position:200% 0}}
+  .stats{display:grid;grid-template-columns:repeat(4,1fr);gap:12px;margin:18px 0}
+  .stat{background:var(--bg);border:1px solid var(--line);border-radius:14px;padding:16px;text-align:center}
+  .stat .v{font-size:26px;font-weight:800}
+  .stat .k{font-size:12px;color:var(--muted);margin-top:4px}
+  .live{display:flex;align-items:center;gap:8px;font-size:13px;color:var(--muted)}
+  .dot{width:9px;height:9px;border-radius:50%;background:var(--ok);animation:pulse 1.4s infinite}
+  @keyframes pulse{0%{box-shadow:0 0 0 0 rgba(39,215,150,.6)}70%{box-shadow:0 0 0 9px rgba(39,215,150,0)}}
+  table{width:100%;border-collapse:collapse;font-size:13.5px}
+  th,td{text-align:left;padding:10px 12px;border-bottom:1px solid var(--line)}
+  th{color:var(--muted);font-weight:600;font-size:12px;text-transform:uppercase;letter-spacing:.5px}
+  td.em{color:var(--ok);font-weight:600}
+  .tag{font-size:11px;padding:3px 9px;border-radius:20px;background:var(--card2);color:var(--muted)}
+  .tablewrap{max-height:360px;overflow:auto;border:1px solid var(--line);border-radius:12px;margin-top:8px}
+  .hidden{display:none}
+  .muted{color:var(--muted);font-size:13px}
+  .err{color:var(--err);font-weight:600;margin-top:10px}
+  .okmsg{color:var(--ok);font-weight:600;margin-top:10px}
+  a{color:var(--accent)}
+  details{margin-top:10px}
+  summary{cursor:pointer;color:var(--muted);font-size:13px}
+  ol{font-size:13.5px;line-height:1.8;color:var(--txt)}
+  .toast{position:fixed;bottom:24px;left:50%;transform:translateX(-50%);background:var(--card2);
+    border:1px solid var(--line);padding:12px 20px;border-radius:12px;opacity:0;transition:.3s;pointer-events:none}
+  .toast.show{opacity:1}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header>
+    <div class="logo">📧</div>
+    <h1>Scraper Email — Dashboard</h1>
+  </header>
+  <div class="sub">Carica la lista, avvia, guarda l'avanzamento e scarica le email. Tutto da qui.</div>
+
+  <!-- STEP 0: connessione -->
+  <div class="card" id="connCard">
+    <div class="step"><span class="num" id="n0">0</span> Collega il tuo GitHub (una volta sola)</div>
+    <label class="lbl">Token di accesso GitHub</label>
+    <input type="password" id="token" placeholder="incolla qui il token (inizia con github_pat_...)">
+    <div class="row" style="margin-top:14px">
+      <button class="btn" id="connBtn">🔌 Collega</button>
+      <span id="connState" class="muted"></span>
+    </div>
+    <div class="err hidden" id="connErr"></div>
+    <details>
+      <summary>Come creo il token? (2 minuti, una volta sola)</summary>
+      <ol>
+        <li>Vai su <a href="https://github.com/settings/personal-access-tokens/new" target="_blank">github.com → Settings → Developer settings → Fine-grained tokens → Generate new token</a></li>
+        <li><b>Token name</b>: scrivi quello che vuoi (es. "scraper").</li>
+        <li><b>Expiration</b>: scegli ad es. 90 giorni.</li>
+        <li><b>Repository access</b> → <b>Only select repositories</b> → scegli <b>scraper-estetica</b>.</li>
+        <li><b>Permissions</b> → <b>Repository permissions</b>: metti <b>Contents = Read and write</b> e <b>Actions = Read and write</b>. (Metadata resta Read.)</li>
+        <li>In fondo premi <b>Generate token</b> e <b>copia</b> il codice che appare.</li>
+        <li>Incollalo qui sopra e premi <b>Collega</b>. Resta salvato solo nel tuo browser.</li>
+      </ol>
+    </details>
+  </div>
+
+  <div id="app" class="hidden">
+    <!-- STEP 1: upload -->
+    <div class="card">
+      <div class="step"><span class="num" id="n1">1</span> Carica la lista dei siti (CSV)</div>
+      <div id="drop" class="drop">
+        <div class="big">📁</div>
+        <div><b>Trascina qui</b> il file CSV, oppure clicca per sceglierlo</div>
+        <div class="hint">Basta una colonna con i siti. Va bene anche con più colonne.</div>
+        <input type="file" id="file" accept=".csv,.txt" class="hidden">
+      </div>
+      <div id="uploaded" class="hidden" style="margin-top:14px">
+        <span class="badge">✓ <span id="upname"></span> — <b id="upcount"></b>&nbsp;siti caricati</span>
+      </div>
+      <div class="err hidden" id="upErr"></div>
+    </div>
+
+    <!-- STEP 2: options + start -->
+    <div class="card">
+      <div class="step"><span class="num" id="n2">2</span> Scegli la potenza e avvia</div>
+      <div class="row">
+        <div class="opt">
+          <label class="lbl">Potenza dello scraper</label>
+          <div class="seg" id="powerseg">
+            <button data-v="massima" class="on">🚀 Massima</button>
+            <button data-v="base">⚡ Base (veloce)</button>
+          </div>
+          <div class="caps" id="caps">Tecniche: testo, Cloudflare, entità, offuscamenti, JavaScript, <b>render JS</b> e <b>OCR immagini</b>. Più completa, più lenta.</div>
+        </div>
+        <div class="opt" style="max-width:200px">
+          <label class="lbl">Siti in parallelo</label>
+          <input type="number" id="conc" value="30" min="1" max="200">
+          <div class="caps">Più alto = più veloce.</div>
+        </div>
+      </div>
+      <div style="margin-top:20px">
+        <button class="btn" id="startBtn" disabled>▶ Avvia scraping</button>
+      </div>
+      <div class="err hidden" id="startErr"></div>
+    </div>
+
+    <!-- STEP 3: progress -->
+    <div class="card hidden" id="progcard">
+      <div class="step" style="justify-content:space-between">
+        <span><span class="num" id="n3">3</span> Avanzamento</span>
+        <span class="live hidden" id="liveTag"><span class="dot"></span> in corso</span>
+      </div>
+      <div class="pbar"><div class="pfill" id="pfill"></div></div>
+      <div style="display:flex;justify-content:space-between;margin-top:8px" class="muted">
+        <span><b id="pctTxt">0%</b> completato</span>
+        <span id="etaTxt"></span>
+      </div>
+      <div class="stats">
+        <div class="stat"><div class="v" id="sDone">0</div><div class="k">Siti analizzati</div></div>
+        <div class="stat"><div class="v" id="sTotal">0</div><div class="k">Siti totali</div></div>
+        <div class="stat"><div class="v" style="color:var(--ok)" id="sWith">0</div><div class="k">Siti con email</div></div>
+        <div class="stat"><div class="v" style="color:var(--accent)" id="sMail">0</div><div class="k">Email trovate</div></div>
+      </div>
+      <div class="row" style="align-items:center">
+        <button class="btn ok hidden" id="dlBtn">⬇ Scarica emails.csv</button>
+        <span class="muted" id="statusMsg"></span>
+        <span class="muted" id="runLink"></span>
+      </div>
+      <div style="margin-top:22px">
+        <div class="step" style="font-size:14px"><span>📋 Email trovate (live)</span></div>
+        <div class="tablewrap">
+          <table>
+            <thead><tr><th>Sito</th><th>Email</th><th>Metodo</th></tr></thead>
+            <tbody id="rows"><tr><td colspan="3" class="muted" style="text-align:center;padding:24px">
+              Le email compariranno qui mentre lo scraper lavora…</td></tr></tbody>
+          </table>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+<div class="toast" id="toast"></div>
+
+<script>
+// ===== CONFIG =====
+const OWNER = "otticaclienti";
+const REPO  = "scraper-estetica";
+const WORKFLOW_FILE = "scraper.yml";
+const RESULT_BRANCH = "risultati";
+const API = "https://api.github.com";
+let REF = "main";            // branch dove gira il workflow (rilevato all'avvio)
+let TOKEN = localStorage.getItem("ghToken") || "";
+
+const $ = s => document.querySelector(s);
+let power="massima", csvText=null, csvName="", siteCount=0, poller=null, lastRunId=null;
+
+function toast(m){const t=$("#toast");t.textContent=m;t.classList.add("show");setTimeout(()=>t.classList.remove("show"),2600);}
+function gh(path, opts={}){
+  opts.headers = Object.assign({
+    "Authorization":"Bearer "+TOKEN,
+    "Accept":"application/vnd.github+json",
+    "X-GitHub-Api-Version":"2022-11-28"
+  }, opts.headers||{});
+  return fetch(API+path, opts);
+}
+// base64 <-> UTF-8
+function b64encode(str){const b=new TextEncoder().encode(str);let s="";b.forEach(c=>s+=String.fromCharCode(c));return btoa(s);}
+function b64decode(b64){const clean=(b64||"").replace(/\s/g,"");const bin=atob(clean);const arr=new Uint8Array(bin.length);for(let i=0;i<bin.length;i++)arr[i]=bin.charCodeAt(i);return new TextDecoder("utf-8").decode(arr);}
+
+// ===== connessione =====
+if(TOKEN){ $("#token").value=TOKEN; }
+$("#connBtn").addEventListener("click",connect);
+async function connect(){
+  TOKEN=$("#token").value.trim();
+  $("#connErr").classList.add("hidden");
+  if(!TOKEN){ showErr("#connErr","Incolla prima il token."); return; }
+  $("#connState").textContent="Verifico…";
+  try{
+    const r=await gh("/repos/"+OWNER+"/"+REPO);
+    if(r.status===401){ showErr("#connErr","Token non valido o scaduto."); $("#connState").textContent=""; return; }
+    if(r.status===404){ showErr("#connErr","Token senza accesso al repository. Controlla i permessi (Repository access → scraper-estetica)."); $("#connState").textContent=""; return; }
+    if(!r.ok){ showErr("#connErr","Errore GitHub ("+r.status+")."); $("#connState").textContent=""; return; }
+    const repo=await r.json();
+    REF = repo.default_branch || "main";
+    localStorage.setItem("ghToken",TOKEN);
+    $("#connState").innerHTML="<span style='color:var(--ok)'>✓ collegato a "+repo.full_name+"</span>";
+    $("#n0").classList.add("done"); $("#n0").textContent="✓";
+    $("#app").classList.remove("hidden");
+    checkRunningRun();
+  }catch(e){ showErr("#connErr","Impossibile contattare GitHub. Controlla la connessione."); $("#connState").textContent=""; }
+}
+function showErr(sel,msg){const e=$(sel);e.textContent=msg;e.classList.remove("hidden");}
+
+// ===== potenza =====
+$("#powerseg").addEventListener("click",e=>{
+  const b=e.target.closest("button"); if(!b)return;
+  [...$("#powerseg").children].forEach(x=>x.classList.remove("on"));
+  b.classList.add("on"); power=b.dataset.v;
+  $("#caps").innerHTML = power==="base"
+    ? "Solo download rapido del sito (HTML). Più veloce, ma trova meno email."
+    : "Tecniche: testo, Cloudflare, entità, offuscamenti, JavaScript, <b>render JS</b> e <b>OCR immagini</b>. Più completa, più lenta.";
+});
+
+// ===== upload =====
+const drop=$("#drop"), fileInput=$("#file");
+drop.addEventListener("click",()=>fileInput.click());
+fileInput.addEventListener("change",()=>{ if(fileInput.files[0]) onFile(fileInput.files[0]); });
+["dragover","dragenter"].forEach(ev=>drop.addEventListener(ev,e=>{e.preventDefault();drop.classList.add("over");}));
+["dragleave","drop"].forEach(ev=>drop.addEventListener(ev,e=>{e.preventDefault();drop.classList.remove("over");}));
+drop.addEventListener("drop",e=>{ const f=e.dataTransfer.files[0]; if(f) onFile(f); });
+
+function countSites(text){
+  const lines=text.split(/\r?\n/).map(l=>l.trim()).filter(Boolean);
+  if(!lines.length) return 0;
+  // se la prima riga sembra intestazione (niente punto/dominio) toglila
+  let start = /\.[a-z]{2,}/i.test(lines[0]) ? 0 : 1;
+  return Math.max(0, lines.length - start);
+}
+async function onFile(file){
+  $("#upErr").classList.add("hidden");
+  csvText=await file.text(); csvName=file.name; siteCount=countSites(csvText);
+  if(siteCount===0){ showErr("#upErr","Non ho trovato siti nel file."); return; }
+  toast("Carico su GitHub…");
+  try{
+    // sha esistente?
+    let sha=null;
+    const g=await gh("/repos/"+OWNER+"/"+REPO+"/contents/siti.csv?ref="+REF);
+    if(g.ok){ sha=(await g.json()).sha; }
+    const body={ message:"Carico lista siti dalla dashboard", content:b64encode(csvText), branch:REF };
+    if(sha) body.sha=sha;
+    const p=await gh("/repos/"+OWNER+"/"+REPO+"/contents/siti.csv",{method:"PUT",body:JSON.stringify(body)});
+    if(!p.ok){ const t=await p.text(); showErr("#upErr","Errore nel caricamento ("+p.status+"). "+t.slice(0,120)); return; }
+    $("#upname").textContent=csvName; $("#upcount").textContent=siteCount.toLocaleString("it-IT");
+    $("#uploaded").classList.remove("hidden");
+    $("#n1").classList.add("done"); $("#n1").textContent="✓";
+    $("#startBtn").disabled=false;
+    toast("Caricati "+siteCount+" siti ✓");
+  }catch(e){ showErr("#upErr","Errore di rete durante il caricamento."); }
+}
+
+// ===== avvio =====
+$("#startBtn").addEventListener("click",startRun);
+async function startRun(){
+  $("#startErr").classList.add("hidden");
+  $("#startBtn").disabled=true;
+  const inputs={ file_input:"siti.csv", potenza:power,
+    concurrency:String(parseInt($("#conc").value||"30")), max_pages:"8", timeout:"15" };
+  try{
+    const r=await gh("/repos/"+OWNER+"/"+REPO+"/actions/workflows/"+WORKFLOW_FILE+"/dispatches",
+      {method:"POST",body:JSON.stringify({ref:REF,inputs})});
+    if(r.status===204){
+      $("#progcard").classList.remove("hidden");
+      $("#liveTag").classList.remove("hidden");
+      $("#pfill").classList.add("anim");
+      $("#rows").innerHTML="";
+      $("#dlBtn").classList.add("hidden");
+      $("#statusMsg").textContent="Avvio in corso… (può volerci qualche secondo)";
+      $("#n2").classList.add("done"); $("#n2").textContent="✓";
+      $("#progcard").scrollIntoView({behavior:"smooth"});
+      startPolling();
+    } else if(r.status===404){
+      showErr("#startErr","Il progetto non risulta ancora attivo sul branch principale del repo. (Va pubblicato il workflow su '"+REF+"'.)");
+      $("#startBtn").disabled=false;
+    } else {
+      const t=await r.text();
+      showErr("#startErr","Avvio non riuscito ("+r.status+"). "+t.slice(0,150));
+      $("#startBtn").disabled=false;
+    }
+  }catch(e){ showErr("#startErr","Errore di rete all'avvio."); $("#startBtn").disabled=false; }
+}
+
+// ===== polling avanzamento =====
+function startPolling(){ if(poller)clearInterval(poller); poller=setInterval(tick,5000); setTimeout(tick,2500); findRun(); }
+async function findRun(){
+  try{
+    const r=await gh("/repos/"+OWNER+"/"+REPO+"/actions/runs?branch="+encodeURIComponent(REF)+"&per_page=5");
+    if(r.ok){ const d=await r.json();
+      if(d.workflow_runs && d.workflow_runs.length){
+        const run=d.workflow_runs[0]; lastRunId=run.id;
+        $("#runLink").innerHTML=" · <a href='"+run.html_url+"' target='_blank'>vedi log su GitHub ↗</a>";
+      }
+    }
+  }catch(e){}
+}
+async function readResultFile(path){
+  const r=await gh("/repos/"+OWNER+"/"+REPO+"/contents/"+path+"?ref="+RESULT_BRANCH+"&t="+Date.now());
+  if(!r.ok) return null;
+  const meta=await r.json();
+  if(meta.content && meta.encoding==="base64") return b64decode(meta.content);
+  // file grande: usa blobs API
+  const b=await gh("/repos/"+OWNER+"/"+REPO+"/git/blobs/"+meta.sha);
+  if(!b.ok) return null;
+  const bd=await b.json();
+  return b64decode(bd.content);
+}
+async function tick(){
+  let prog=null;
+  try{ const t=await readResultFile("progress.json"); if(t) prog=JSON.parse(t); }catch(e){}
+  if(prog){
+    const pct = prog.total>0 ? Math.min(100,Math.round(prog.done/prog.total*100)) : 0;
+    $("#pfill").style.width=pct+"%"; $("#pctTxt").textContent=pct+"%";
+    $("#sDone").textContent=(prog.done||0).toLocaleString("it-IT");
+    $("#sTotal").textContent=(prog.total||0).toLocaleString("it-IT");
+    $("#sWith").textContent=(prog.with_email||0).toLocaleString("it-IT");
+    $("#sMail").textContent=(prog.emails||0).toLocaleString("it-IT");
+    if(prog.running && prog.done>0){ $("#statusMsg").textContent="Scraping in corso…"; }
+    await refreshTable();
+    if(prog.finished || prog.running===false){ finish(prog); }
+  } else {
+    $("#statusMsg").textContent="In attesa che lo scraper parta sui server di GitHub…";
+  }
+}
+async function refreshTable(){
+  try{
+    const csv=await readResultFile("emails.csv"); if(!csv) return;
+    const rows=csv.split(/\r?\n/).slice(1).filter(Boolean).map(l=>splitCsv(l)).filter(c=>c[1]);
+    if(rows.length){
+      $("#rows").innerHTML=rows.slice(-200).reverse().map(c=>
+        `<tr><td>${esc(c[0])}</td><td class="em">${esc(c[1])}</td><td><span class="tag">${esc(c[2]||"")}</span></td></tr>`).join("");
+    }
+  }catch(e){}
+}
+function splitCsv(line){
+  const out=[];let cur="",q=false;
+  for(let i=0;i<line.length;i++){const ch=line[i];
+    if(ch==='"'){ if(q&&line[i+1]==='"'){cur+='"';i++;} else q=!q; }
+    else if(ch===','&&!q){ out.push(cur);cur=""; } else cur+=ch;}
+  out.push(cur);return out;
+}
+function finish(prog){
+  if(poller){clearInterval(poller);poller=null;}
+  $("#liveTag").classList.add("hidden");
+  $("#pfill").classList.remove("anim");
+  $("#pfill").style.width="100%"; $("#pctTxt").textContent="100%";
+  $("#statusMsg").textContent="Completato: "+(prog.emails||0)+" email trovate 🎉";
+  $("#dlBtn").classList.remove("hidden");
+  $("#startBtn").disabled=false;
+  toast("Scraping terminato!");
+}
+$("#dlBtn").addEventListener("click",async()=>{
+  toast("Preparo il file…");
+  const csv=await readResultFile("emails.csv");
+  if(!csv){ toast("File non ancora disponibile, riprova tra poco."); return; }
+  const blob=new Blob([csv],{type:"text/csv;charset=utf-8"});
+  const a=document.createElement("a");
+  a.href=URL.createObjectURL(blob); a.download="emails.csv"; a.click();
+});
+function esc(t){return (t||"").replace(/[&<>"]/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[c]));}
+
+// riaggancia un run gia' in corso (se ricarico la pagina)
+async function checkRunningRun(){
+  try{
+    const t=await readResultFile("progress.json");
+    if(t){ const p=JSON.parse(t);
+      if(p.running){ $("#progcard").classList.remove("hidden"); $("#liveTag").classList.remove("hidden");
+        $("#pfill").classList.add("anim"); startPolling(); }
+    }
+  }catch(e){}
+}
+// auto-connetti se ho gia' il token
+if(TOKEN){ connect(); }
+</script>
+</body>
+</html>

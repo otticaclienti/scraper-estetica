@@ -28,6 +28,7 @@ import csv
 import glob
 import html as html_module
 import io
+import json
 import os
 import re
 import sys
@@ -596,6 +597,25 @@ class CsvSink:
             pass
 
 
+def write_progress(path, counters, running=True, finished=False):
+    if not path:
+        return
+    try:
+        tmp = path + ".tmp"
+        with open(tmp, "w", encoding="utf-8") as f:
+            json.dump({
+                "total": counters["total"],
+                "done": counters["done"],
+                "with_email": counters["with_email"],
+                "emails": counters["emails"],
+                "running": running,
+                "finished": finished,
+            }, f)
+        os.replace(tmp, path)
+    except Exception:
+        pass
+
+
 async def worker(queue, scraper, session, sink, lock, counters, loop):
     while True:
         site = await queue.get()
@@ -620,6 +640,7 @@ async def worker(queue, scraper, session, sink, lock, counters, loop):
                 print(f"  ...{counters['done']}/{counters['total']} siti | "
                       f"{counters['with_email']} con email | "
                       f"{counters['emails']} email totali", file=sys.stderr)
+                write_progress(counters.get("progress_file"), counters)
         queue.task_done()
 
 
@@ -648,7 +669,9 @@ async def run(args):
     if new_file:
         sink.writerow(["sito", "email", "stato"])
 
-    counters = {"total": len(todo), "done": 0, "with_email": 0, "emails": 0}
+    counters = {"total": len(todo), "done": 0, "with_email": 0, "emails": 0,
+                "progress_file": args.progress_file}
+    write_progress(args.progress_file, counters, running=True)
     lock = asyncio.Lock()
     queue = asyncio.Queue()
     for s in todo:
@@ -674,6 +697,7 @@ async def run(args):
     await scraper.close()
     out_f.flush()
     out_f.close()
+    write_progress(args.progress_file, counters, running=False, finished=True)
     print(f"\nFatto. {counters['done']} siti processati | "
           f"{counters['with_email']} con almeno un'email | "
           f"{counters['emails']} email totali.\n"
@@ -693,6 +717,8 @@ def main():
                    help="timeout per pagina in secondi (default: 15)")
     p.add_argument("--max-pages", type=int, default=8,
                    help="pagine massime per sito (default: 8)")
+    p.add_argument("--progress-file", default=None,
+                   help="scrive l'avanzamento in un file JSON (per la dashboard)")
     # render
     p.add_argument("--render", action="store_true",
                    help="attiva il rendering JavaScript (browser headless)")
