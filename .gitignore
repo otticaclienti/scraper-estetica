@@ -1,7 +1,9 @@
-# Dati di input/output (di solito non vanno versionati)
-siti.csv
+# Il file dei risultati viene prodotto come "artifact" da GitHub Actions,
+# non serve versionarlo.
 emails.csv
 *.out.csv
+# NB: siti.csv (la tua lista) DEVE stare nel repo per essere usato da
+# GitHub Actions, quindi NON va ignorato.
 
 # Python
 __pycache__/

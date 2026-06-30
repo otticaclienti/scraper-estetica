@@ -1,0 +1,83 @@
+name: Estrai email dai siti
+
+# Si avvia a mano dalla scheda "Actions" del repo (pulsante "Run workflow").
+on:
+  workflow_dispatch:
+    inputs:
+      file_input:
+        description: "Nome del file CSV con i siti (caricato nel repo)"
+        required: true
+        default: "siti.csv"
+      concurrency:
+        description: "Siti in parallelo (piu' alto = piu' veloce)"
+        required: true
+        default: "30"
+      max_pages:
+        description: "Pagine massime per sito (home + contatti)"
+        required: true
+        default: "5"
+      timeout:
+        description: "Timeout per pagina in secondi"
+        required: true
+        default: "15"
+
+jobs:
+  scrape:
+    runs-on: ubuntu-latest
+    timeout-minutes: 350
+    env:
+      PYTHONUNBUFFERED: "1"   # mostra l'avanzamento in tempo reale nel log
+
+    steps:
+      - name: Scarica il codice del repo
+        uses: actions/checkout@v4
+
+      - name: Prepara Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Installa le dipendenze
+        run: pip install -r requirements.txt
+
+      - name: Controlla che il file dei siti esista
+        run: |
+          if [ ! -f "${{ inputs.file_input }}" ]; then
+            echo "::error::Il file '${{ inputs.file_input }}' non esiste nel repo. Caricalo prima (Add file -> Upload files) e riprova."
+            exit 1
+          fi
+          echo "Trovato il file: ${{ inputs.file_input }}"
+
+      - name: Esegui lo scraper
+        run: |
+          python scraper.py \
+            --input "${{ inputs.file_input }}" \
+            --output emails.csv \
+            --concurrency "${{ inputs.concurrency }}" \
+            --max-pages "${{ inputs.max_pages }}" \
+            --timeout "${{ inputs.timeout }}"
+
+      - name: Riepilogo risultati
+        if: always()
+        run: |
+          if [ -f emails.csv ]; then
+            TOTALE=$(($(wc -l < emails.csv) - 1))
+            CON_EMAIL=$(awk -F',' 'NR>1 && $2!="" {print $1}' emails.csv | sort -u | wc -l)
+            EMAIL_UNICHE=$(awk -F',' 'NR>1 && $2!="" {print $2}' emails.csv | sort -u | wc -l)
+            echo "## Risultato scraping :mailbox:" >> $GITHUB_STEP_SUMMARY
+            echo "" >> $GITHUB_STEP_SUMMARY
+            echo "- Righe nel file: **$TOTALE**" >> $GITHUB_STEP_SUMMARY
+            echo "- Siti con almeno un'email: **$CON_EMAIL**" >> $GITHUB_STEP_SUMMARY
+            echo "- Email uniche trovate: **$EMAIL_UNICHE**" >> $GITHUB_STEP_SUMMARY
+            echo "" >> $GITHUB_STEP_SUMMARY
+            echo "Scarica il file **emails.csv** qui sotto, nella sezione *Artifacts*." >> $GITHUB_STEP_SUMMARY
+          fi
+
+      - name: Carica il risultato (emails.csv) come artifact da scaricare
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: emails
+          path: emails.csv
+          if-no-files-found: warn
+          retention-days: 90

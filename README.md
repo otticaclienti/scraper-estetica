@@ -4,6 +4,12 @@ Estrae tutte le email da una lista di siti web (anche migliaia). Per ogni sito
 scarica la homepage e le pagine "contatti / chi siamo / privacy", cerca le email
 nel testo e nei link `mailto:`, e salva tutto in un CSV.
 
+> 🟢 **Vuoi usarlo dal browser, gratis e senza installare niente?**
+> Segui la **[GUIDA.md](GUIDA.md)**: carichi il CSV su GitHub, premi un pulsante
+> nella scheda *Actions*, e scarichi le email. Tutto online.
+>
+> Il resto di questo file spiega invece come usarlo a riga di comando sul tuo PC.
+
 ## Installazione (una volta sola)
 
 ```bash
