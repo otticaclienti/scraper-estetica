@@ -1,35 +1,38 @@
 #!/usr/bin/env python3
 """
-Scraper di email da una lista di siti web.
+Scraper di email da una lista di siti web — versione "potente".
 
-Legge un CSV con una colonna di siti/domini, per ogni sito scarica la homepage
-e alcune pagine "contatti", estrae le email e scrive un CSV con le coppie
-(sito, email).
+Per ogni sito scarica homepage + pagine contatti (e prova pagine tipiche tipo
+/contatti, /privacy), poi estrae le email con molte tecniche:
 
-Caratteristiche:
-- asincrono (veloce su migliaia di siti)
-- ripresa automatica: se interrotto, riparte dai siti non ancora processati
-- robusto agli errori di rete / timeout / SSL
+- testo normale e link mailto: (anche con %40 al posto di @)
+- entita' HTML (&#64; = @) e caratteri invisibili
+- decodifica dell'offuscamento Cloudflare (data-cfemail / cdn-cgi/email-protection)
+- offuscamenti testuali: "info [at] dominio [punto] it", (at), chiocciola, dot...
+- email costruite via JavaScript ("info" + "@" + "sito.it")
+- RENDER JavaScript con browser headless (email caricate dinamicamente) [opzionale]
+- OCR sulle immagini (email messe come foto)                            [opzionale]
 
-Uso:
+Uso base:
     python3 scraper.py --input siti.csv --output emails.csv
 
-Opzioni principali:
-    --input        CSV di ingresso (default: siti.csv)
-    --output       CSV di uscita con sito,email (default: emails.csv)
-    --column       nome o indice della colonna con i siti (default: auto-detect)
-    --concurrency  numero di richieste in parallelo (default: 30)
-    --timeout      timeout per richiesta in secondi (default: 15)
-    --max-pages    pagine massime da visitare per sito (default: 5)
+Massima potenza (piu' lento ma trova di piu'):
+    python3 scraper.py -i siti.csv -o emails.csv --render --ocr
+
+Ripresa: se interrotto, rilancia lo stesso comando e riparte dai siti mancanti.
 """
 
 import argparse
 import asyncio
 import csv
+import glob
+import html as html_module
+import io
 import os
 import re
 import sys
-from urllib.parse import urljoin, urlparse
+from concurrent.futures import ThreadPoolExecutor
+from urllib.parse import unquote, urljoin, urlparse
 
 import aiohttp
 from bs4 import BeautifulSoup
@@ -38,92 +41,191 @@ from bs4 import BeautifulSoup
 # Estrazione email
 # ---------------------------------------------------------------------------
 
-# Regex email abbastanza permissiva ma sensata.
-EMAIL_RE = re.compile(
-    r"\b[A-Za-z0-9._%+\-]+@[A-Za-z0-9.\-]+\.[A-Za-z]{2,24}\b"
-)
+EMAIL_RE = re.compile(r"[A-Za-z0-9._%+\-]+@[A-Za-z0-9.\-]+\.[A-Za-z]{2,24}")
 
-# Estensioni di file che a volte vengono "catturate" come email finte
-# (es. logo@2x.png) o domini di immagini/asset da scartare.
 BAD_DOMAIN_SUFFIXES = (
     ".png", ".jpg", ".jpeg", ".gif", ".webp", ".svg", ".bmp",
-    ".css", ".js", ".json", ".webp", ".ico",
+    ".css", ".js", ".json", ".ico", ".tif", ".tiff", ".mp4", ".pdf",
 )
 
-# Email "spazzatura" tipiche da scartare.
 JUNK_LOCAL_PARTS = {
-    "example", "email", "your", "yourname", "name", "nome",
-    "user", "username", "info@example", "test",
+    "example", "email", "your", "yourname", "name", "nome", "mail",
+    "user", "username", "test", "esempio", "info@example",
 }
 
-JUNK_SUBSTRINGS = (
-    "example.com", "example.org", "domain.com", "sentry.io", "wixpress.com",
-    "yourdomain", "email.com", "tuodominio", "mail.com@",
+# Domini tecnici / di terze parti da scartare (non sono contatti reali).
+JUNK_DOMAIN_SUBSTRINGS = (
+    "example.com", "example.org", "example.net", "domain.com", "domain.it",
+    "sentry.io", "sentry-next.wixpress.com", "wixpress.com", "wix.com",
+    "googleapis.com", "gstatic.com", "schema.org", "w3.org", "sentry.wixpress",
+    "yourdomain", "email.com", "tuodominio", "tuosito", "namedomain",
+    "godaddy.com", "squarespace.com", "wordpress.org", "wordpress.com",
+    "core.trac.wordpress.org", "@2x", "@3x", "@sx", "u003e", "u0040",
+    "placeholder", "test.com", "abc.com", "mail.example",
 )
+
+ZERO_WIDTH = dict.fromkeys(
+    map(ord, "​‌‍⁠﻿­"), None
+)
+
+
+def decode_cfemail(hexstr):
+    """Decodifica una stringa Cloudflare email-protection (esadecimale)."""
+    try:
+        hexstr = hexstr.strip()
+        r = int(hexstr[:2], 16)
+        out = []
+        for i in range(2, len(hexstr), 2):
+            out.append(chr(int(hexstr[i:i + 2], 16) ^ r))
+        return "".join(out)
+    except Exception:
+        return None
 
 
 def clean_emails(raw_emails):
     """Normalizza e filtra una lista di email candidate."""
     out = set()
     for e in raw_emails:
-        e = e.strip().strip(".").lower()
-        if not e or "@" not in e:
+        if not e:
             continue
-        # scarta finte email che finiscono con estensioni di file
-        if e.endswith(BAD_DOMAIN_SUFFIXES):
+        e = e.translate(ZERO_WIDTH)
+        e = e.strip().strip(".,;:<>()[]{}\"'").lower()
+        e = e.replace("mailto:", "")
+        if "@" not in e:
             continue
+        # se ci sono piu' @ tieni la prima coppia local@domain plausibile
+        m = EMAIL_RE.search(e)
+        if not m:
+            continue
+        e = m.group(0).strip(".")
         local, _, domain = e.partition("@")
         if not local or not domain or "." not in domain:
             continue
+        if e.endswith(BAD_DOMAIN_SUFFIXES):
+            continue
         if local in JUNK_LOCAL_PARTS:
             continue
-        if any(j in e for j in JUNK_SUBSTRINGS):
+        if any(j in e for j in JUNK_DOMAIN_SUBSTRINGS):
             continue
-        # un dominio sensato non inizia/finisce con punto o trattino
         if domain.startswith((".", "-")) or domain.endswith((".", "-")):
             continue
-        # scarta sequenze numeriche tipo 2x (es. immagini retina)
+        if ".." in domain:
+            continue
+        # tld finale di lettere
+        tld = domain.rsplit(".", 1)[-1]
+        if not tld.isalpha() or len(tld) < 2:
+            continue
+        # scarta immagini retina tipo logo@2x
         if re.fullmatch(r"\d+x?", local):
+            continue
+        # local part troppo lungo = probabile spazzatura
+        if len(local) > 64 or len(e) > 100:
             continue
         out.add(e)
     return out
 
 
-def extract_emails_from_html(html):
-    """Estrae email dal testo HTML e dai link mailto:."""
-    found = set(EMAIL_RE.findall(html))
+def _deobfuscate_text(text):
+    """Sostituisce gli offuscamenti testuali piu' comuni con @ e . ."""
+    t = text
+    # @  ->  varianti
+    t = re.sub(r"\s*[\(\[\{<]\s*(?:at|chiocciola|arobase|apestaartje)\s*[\)\]\}>]\s*",
+               "@", t, flags=re.IGNORECASE)
+    t = re.sub(r"\s+(?:at|chiocciola)\s+", "@", t, flags=re.IGNORECASE)
+    # .  ->  varianti
+    t = re.sub(r"\s*[\(\[\{<]\s*(?:dot|punto|point)\s*[\)\]\}>]\s*",
+               ".", t, flags=re.IGNORECASE)
+    t = re.sub(r"\s+(?:dot|punto)\s+", ".", t, flags=re.IGNORECASE)
+    return t
 
-    # mailto: links (catturano anche email offuscate via attributo href)
-    for m in re.findall(r"mailto:([^\"'?>\s]+)", html, flags=re.IGNORECASE):
-        found.add(m)
 
-    # de-offuscamento semplice: "info [at] dominio [dot] it"
-    deobf = re.sub(r"\s*\[?\(?\s*at\s*\)?\]?\s*", "@", html, flags=re.IGNORECASE)
-    deobf = re.sub(r"\s*\[?\(?\s*dot\s*\)?\]?\s*", ".", deobf, flags=re.IGNORECASE)
+def extract_emails_from_html(html, base_url=None):
+    """Estrae email da una pagina HTML con molte tecniche."""
+    if not html:
+        return set(), []
+
+    found = set()
+
+    # 0) entita' HTML (&#64; ecc.) -> testo reale
+    unescaped = html_module.unescape(html)
+
+    # 1) testo grezzo + entita'
+    found |= set(EMAIL_RE.findall(html))
+    found |= set(EMAIL_RE.findall(unescaped))
+
+    # 2) Cloudflare email protection: data-cfemail="..."
+    for hx in re.findall(r'data-cfemail="([0-9a-fA-F]+)"', html):
+        dec = decode_cfemail(hx)
+        if dec:
+            found.add(dec)
+    # /cdn-cgi/l/email-protection#<hex> oppure ...protection?<hex>
+    for hx in re.findall(r'email-protection[#?]([0-9a-fA-F]+)', html):
+        dec = decode_cfemail(hx)
+        if dec:
+            found.add(dec)
+
+    # 3) mailto: (anche con encoding %40 = @, %2E = .)
+    for m in re.findall(r'mailto:([^"\'?>\s]+)', unescaped, flags=re.IGNORECASE):
+        found.add(unquote(m))
+
+    # 4) attributi data-* tipici (data-email, data-mail, data-e-mail)
+    for m in re.findall(r'data-(?:e-?mail|mail)\s*=\s*["\']([^"\']+)["\']',
+                        unescaped, flags=re.IGNORECASE):
+        found.add(unquote(m))
+
+    # 5) email costruite via JS:  "info" + "@" + "sito.it"
+    glued = re.sub(r"['\"]\s*\+\s*['\"]", "", unescaped)
+    found |= set(EMAIL_RE.findall(glued))
+
+    # 6) de-offuscamento testuale: info [at] dominio [dot] it
+    deobf = _deobfuscate_text(unescaped)
     found |= set(EMAIL_RE.findall(deobf))
 
-    return clean_emails(found)
+    emails = clean_emails(found)
+
+    # raccogli URL di immagini candidate (per eventuale OCR)
+    image_urls = []
+    if base_url:
+        try:
+            soup = BeautifulSoup(html, "html.parser")
+            for img in soup.find_all("img"):
+                src = img.get("src") or img.get("data-src") or ""
+                if not src:
+                    continue
+                alt = (img.get("alt") or "").lower()
+                hay = (src + " " + alt).lower()
+                full = urljoin(base_url, src)
+                if any(k in hay for k in ("mail", "email", "contatt", "contact",
+                                          "scrivi", "@")):
+                    image_urls.append((full, 2))   # priorita' alta
+                else:
+                    image_urls.append((full, 1))   # priorita' bassa
+        except Exception:
+            pass
+
+    return emails, image_urls
 
 
 # ---------------------------------------------------------------------------
-# Scelta delle pagine da visitare
+# Scelta delle pagine
 # ---------------------------------------------------------------------------
 
-# Parole chiave nei link che indicano pagine utili per trovare email.
 CONTACT_KEYWORDS = (
     "contatt", "contact", "chi-siamo", "chisiamo", "about", "privacy",
     "dove-siamo", "dovesiamo", "info", "azienda", "team", "staff",
-    "impressum", "support", "assistenza",
+    "impressum", "support", "assistenza", "note-legali", "cookie",
+    "prenota", "appuntament", "scrivi", "recapiti", "sede",
+)
+
+GUESS_PATHS = (
+    "/contatti", "/contatto", "/contact", "/contact-us", "/contacts",
+    "/chi-siamo", "/about", "/about-us", "/privacy", "/privacy-policy",
+    "/note-legali", "/cookie-policy", "/dove-siamo", "/recapiti",
 )
 
 
 def normalize_url(site):
-    """Trasforma un dominio/URL grezzo in un URL http(s) valido."""
-    site = site.strip()
-    if not site:
-        return None
-    # rimuovi eventuali wrapping
-    site = site.strip().strip('"').strip("'")
+    site = (site or "").strip().strip('"').strip("'")
     if not site:
         return None
     if not re.match(r"^https?://", site, re.IGNORECASE):
@@ -131,16 +233,13 @@ def normalize_url(site):
     return site
 
 
-def pick_contact_links(base_url, html, max_links):
-    """Trova i link interni che probabilmente contengono contatti/email."""
+def pick_contact_links(base_url, html, limit):
     try:
         soup = BeautifulSoup(html, "html.parser")
     except Exception:
         return []
-
     base_host = urlparse(base_url).netloc.lower()
-    candidates = []
-    seen = set()
+    out, seen = [], set()
     for a in soup.find_all("a", href=True):
         href = a["href"].strip()
         if not href or href.startswith(("mailto:", "tel:", "javascript:", "#")):
@@ -150,23 +249,21 @@ def pick_contact_links(base_url, html, max_links):
         parsed = urlparse(full)
         if parsed.scheme not in ("http", "https"):
             continue
-        # solo link interni allo stesso dominio
         if parsed.netloc.lower() != base_host:
             continue
-        key = parsed.path.lower()
+        key = parsed.path.lower().rstrip("/")
         if key in seen:
             continue
-        haystack = (href + " " + text).lower()
-        if any(k in haystack for k in CONTACT_KEYWORDS):
+        if any(k in (href + " " + text).lower() for k in CONTACT_KEYWORDS):
             seen.add(key)
-            candidates.append(full)
-        if len(candidates) >= max_links:
+            out.append(full)
+        if len(out) >= limit:
             break
-    return candidates
+    return out
 
 
 # ---------------------------------------------------------------------------
-# Fetch
+# Scraper
 # ---------------------------------------------------------------------------
 
 HEADERS = {
@@ -179,63 +276,240 @@ HEADERS = {
 }
 
 
-async def fetch(session, url, timeout):
-    """Scarica una pagina, ritorna (html, final_url) o (None, None)."""
-    try:
-        async with session.get(
-            url, timeout=aiohttp.ClientTimeout(total=timeout),
-            ssl=False, allow_redirects=True,
-        ) as resp:
-            ctype = resp.headers.get("Content-Type", "")
-            if "html" not in ctype and "text" not in ctype and ctype:
-                return None, str(resp.url)
-            # limita la dimensione letta (~2MB) per evitare pagine enormi
-            data = await resp.content.read(2_000_000)
-            html = data.decode(resp.charset or "utf-8", errors="replace")
-            return html, str(resp.url)
-    except Exception:
-        return None, None
+def find_chromium():
+    for p in sorted(glob.glob("/opt/pw-browsers/chromium-*/chrome-linux/chrome")):
+        return p
+    return None
 
 
-async def scrape_site(session, site, timeout, max_pages):
-    """Scarica un sito (homepage + pagine contatti) e ritorna le email trovate."""
-    url = normalize_url(site)
-    if not url:
-        return site, set(), "url-non-valido"
+class Scraper:
+    def __init__(self, args):
+        self.args = args
+        self.timeout = args.timeout
+        self.max_pages = args.max_pages
+        self.use_render = args.render
+        self.use_ocr = args.ocr
+        self.browser = None
+        self._pw = None
+        self.render_sem = asyncio.Semaphore(max(1, args.render_concurrency))
+        self.ocr_executor = ThreadPoolExecutor(max_workers=args.ocr_workers) \
+            if args.ocr else None
 
-    emails = set()
-    status = "ok"
+    # ---- fetch statico -------------------------------------------------
+    async def fetch(self, session, url):
+        try:
+            async with session.get(
+                url, timeout=aiohttp.ClientTimeout(total=self.timeout),
+                ssl=False, allow_redirects=True,
+            ) as resp:
+                ctype = resp.headers.get("Content-Type", "")
+                if ctype and "html" not in ctype and "text" not in ctype \
+                        and "xml" not in ctype:
+                    return None, str(resp.url)
+                data = await resp.content.read(3_000_000)
+                charset = resp.charset or "utf-8"
+                return data.decode(charset, errors="replace"), str(resp.url)
+        except Exception:
+            return None, None
 
-    html, final_url = await fetch(session, url, timeout)
-    if html is None:
-        # riprova in http se era https
-        if url.lower().startswith("https://"):
-            html, final_url = await fetch(
-                session, "http://" + url[len("https://"):], timeout
+    async def fetch_bytes(self, session, url, limit=4_000_000):
+        try:
+            async with session.get(
+                url, timeout=aiohttp.ClientTimeout(total=self.timeout),
+                ssl=False, allow_redirects=True,
+            ) as resp:
+                return await resp.content.read(limit)
+        except Exception:
+            return None
+
+    # ---- render JS -----------------------------------------------------
+    async def ensure_browser(self):
+        if self.browser is not None:
+            return
+        from playwright.async_api import async_playwright
+        self._pw = await async_playwright().start()
+        exe = find_chromium()
+        launch_args = ["--no-sandbox", "--disable-dev-shm-usage",
+                       "--disable-gpu", "--disable-blink-features=AutomationControlled"]
+        try:
+            self.browser = await self._pw.chromium.launch(
+                headless=True, args=launch_args,
+                **({"executable_path": exe} if exe else {}),
             )
+        except Exception:
+            self.browser = await self._pw.chromium.launch(
+                headless=True, args=launch_args)
+
+    async def render(self, url):
+        """Apre l'URL in un browser headless e ritorna l'HTML renderizzato."""
+        async with self.render_sem:
+            try:
+                await self.ensure_browser()
+                ctx = await self.browser.new_context(
+                    user_agent=HEADERS["User-Agent"],
+                    locale="it-IT", ignore_https_errors=True,
+                )
+                page = await ctx.new_page()
+                try:
+                    await page.goto(url, timeout=self.timeout * 1000,
+                                    wait_until="domcontentloaded")
+                    await page.wait_for_timeout(1500)
+                    content = await page.content()
+                    # prova a estrarre anche da link mailto via DOM
+                    try:
+                        hrefs = await page.eval_on_selector_all(
+                            "a[href^='mailto:']",
+                            "els => els.map(e => e.getAttribute('href'))")
+                        content += "\n" + "\n".join(h or "" for h in hrefs)
+                    except Exception:
+                        pass
+                    return content
+                finally:
+                    await ctx.close()
+            except Exception:
+                return None
+
+    # ---- OCR -----------------------------------------------------------
+    def _ocr_sync(self, data):
+        try:
+            import pytesseract
+            from PIL import Image, ImageOps
+            img = Image.open(io.BytesIO(data))
+            img = img.convert("L")
+            img = ImageOps.autocontrast(img)
+            # ingrandisci immagini piccole per leggere meglio
+            if img.width < 1000:
+                ratio = max(1, 1000 // max(1, img.width))
+                if ratio > 1:
+                    img = img.resize((img.width * ratio, img.height * ratio))
+            txt = pytesseract.image_to_string(img, lang="ita+eng")
+            return txt
+        except Exception:
+            return ""
+
+    async def ocr_images(self, session, image_urls, loop, limit):
+        """Scarica ed esegue OCR su un numero limitato di immagini candidate."""
+        # ordina per priorita' (mail/contact prima), dedup
+        seen, ordered = set(), []
+        for u, prio in sorted(image_urls, key=lambda x: -x[1]):
+            if u in seen:
+                continue
+            seen.add(u)
+            ordered.append(u)
+        ordered = ordered[:limit]
+
+        emails = set()
+        for u in ordered:
+            data = await self.fetch_bytes(session, u, limit=3_000_000)
+            if not data or len(data) < 200:
+                continue
+            txt = await loop.run_in_executor(self.ocr_executor, self._ocr_sync, data)
+            if txt and "@" in txt:
+                emails |= extract_emails_from_html(_deobfuscate_text(txt))[0]
+                emails |= clean_emails(EMAIL_RE.findall(_deobfuscate_text(txt)))
+        return emails
+
+    # ---- un sito -------------------------------------------------------
+    async def scrape_site(self, session, site, loop):
+        url = normalize_url(site)
+        if not url:
+            return site, set(), "url-non-valido"
+
+        emails = set()
+        methods = set()
+        all_images = []
+
+        html, final_url = await self.fetch(session, url)
+        if html is None and url.lower().startswith("https://"):
+            html, final_url = await self.fetch(
+                session, "http://" + url[len("https://"):])
         if html is None:
-            return site, set(), "irraggiungibile"
+            # ultimo tentativo: render diretto (alcuni siti bloccano i bot semplici)
+            if self.use_render:
+                html = await self.render(url)
+                final_url = url
+                if html:
+                    methods.add("render")
+            if html is None:
+                return site, set(), "irraggiungibile"
 
-    emails |= extract_emails_from_html(html)
+        base = final_url or url
+        e, imgs = extract_emails_from_html(html, base)
+        emails |= e
+        all_images += imgs
+        if e:
+            methods.add("statico")
 
-    # visita le pagine contatti
-    contact_links = pick_contact_links(final_url or url, html, max_pages - 1)
-    for link in contact_links:
-        chtml, _ = await fetch(session, link, timeout)
-        if chtml:
-            emails |= extract_emails_from_html(chtml)
+        # pagine da visitare: link contatti + percorsi tipici
+        links = pick_contact_links(base, html, self.max_pages)
+        link_paths = {urlparse(l).path.lower().rstrip("/") for l in links}
+        root = "{0.scheme}://{0.netloc}".format(urlparse(base))
+        for gp in GUESS_PATHS:
+            if len(links) >= self.max_pages:
+                break
+            if gp.rstrip("/") in link_paths:
+                continue
+            links.append(root + gp)
 
-    if not emails:
-        status = "nessuna-email"
-    return site, emails, status
+        for link in links[:self.max_pages]:
+            chtml, _ = await self.fetch(session, link)
+            if chtml:
+                e, imgs = extract_emails_from_html(chtml, link)
+                if e:
+                    emails |= e
+                    methods.add("statico")
+                all_images += imgs
+
+        # FALLBACK render JS se non abbiamo trovato nulla
+        if self.use_render and not emails:
+            rhtml = await self.render(base)
+            if rhtml:
+                e, imgs = extract_emails_from_html(rhtml, base)
+                if e:
+                    emails |= e
+                    methods.add("render")
+                all_images += imgs
+            # prova anche la prima pagina contatti renderizzata
+            if not emails and links:
+                rhtml = await self.render(links[0])
+                if rhtml:
+                    e, imgs = extract_emails_from_html(rhtml, links[0])
+                    if e:
+                        emails |= e
+                        methods.add("render")
+                    all_images += imgs
+
+        # FALLBACK OCR sulle immagini se ancora nulla (o sempre, se --ocr-all)
+        if self.use_ocr and (not emails or self.args.ocr_all):
+            ocr_emails = await self.ocr_images(
+                session, all_images, loop, self.args.ocr_max_images)
+            if ocr_emails:
+                emails |= ocr_emails
+                methods.add("ocr")
+
+        status = "+".join(sorted(methods)) if emails else "nessuna-email"
+        return site, emails, status
+
+    async def close(self):
+        if self.browser:
+            try:
+                await self.browser.close()
+            except Exception:
+                pass
+        if self._pw:
+            try:
+                await self._pw.stop()
+            except Exception:
+                pass
+        if self.ocr_executor:
+            self.ocr_executor.shutdown(wait=False)
 
 
 # ---------------------------------------------------------------------------
-# Lettura input / scrittura output con ripresa
+# Input / output con ripresa
 # ---------------------------------------------------------------------------
 
 def read_sites(path, column):
-    """Legge i siti dal CSV. Auto-detect della colonna se non specificata."""
     sites = []
     with open(path, newline="", encoding="utf-8-sig", errors="replace") as f:
         sample = f.read(4096)
@@ -244,49 +518,37 @@ def read_sites(path, column):
             dialect = csv.Sniffer().sniff(sample, delimiters=",;\t")
         except csv.Error:
             dialect = csv.excel
-        reader = csv.reader(f, dialect)
-        rows = list(reader)
-
+        rows = list(csv.reader(f, dialect))
     if not rows:
         return sites
 
-    # determina la colonna
     header = rows[0]
-    col_idx = None
-    data_start = 0
+    col_idx, data_start = None, 0
 
     if column is not None:
-        # indice numerico o nome colonna
         if column.isdigit():
             col_idx = int(column)
         else:
-            lower_header = [h.strip().lower() for h in header]
-            if column.lower() in lower_header:
-                col_idx = lower_header.index(column.lower())
-                data_start = 1
+            lh = [h.strip().lower() for h in header]
+            if column.lower() in lh:
+                col_idx = lh.index(column.lower()); data_start = 1
         if col_idx is None:
             print(f"Colonna '{column}' non trovata, uso auto-detect.", file=sys.stderr)
 
     if col_idx is None:
-        # auto-detect: cerca header che sembra un sito/url
-        lower_header = [h.strip().lower() for h in header]
-        url_names = ("sito", "site", "url", "website", "web", "dominio", "domain", "link")
-        for i, h in enumerate(lower_header):
+        lh = [h.strip().lower() for h in header]
+        url_names = ("sito", "site", "url", "website", "web", "dominio",
+                     "domain", "link", "indirizzo")
+        for i, h in enumerate(lh):
             if any(n in h for n in url_names):
-                col_idx = i
-                data_start = 1
-                break
+                col_idx = i; data_start = 1; break
         if col_idx is None:
-            # nessun header riconoscibile: scegli la colonna che sembra contenere URL
-            # guardando la prima riga di dati
-            first = rows[0]
-            for i, cell in enumerate(first):
+            for i, cell in enumerate(rows[0]):
                 if re.search(r"\.[a-z]{2,}", cell.lower()):
-                    col_idx = i
-                    break
+                    col_idx = i; break
             if col_idx is None:
                 col_idx = 0
-            data_start = 0  # nessun header riconosciuto -> tratta tutto come dati
+            data_start = 0
 
     seen = set()
     for row in rows[data_start:]:
@@ -295,23 +557,22 @@ def read_sites(path, column):
         val = row[col_idx].strip()
         if not val:
             continue
-        key = val.lower()
-        if key in seen:
+        k = val.lower()
+        if k in seen:
             continue
-        seen.add(key)
+        seen.add(k)
         sites.append(val)
     return sites
 
 
 def load_done(output_path):
-    """Carica i siti già processati (per la ripresa)."""
     done = set()
     if not os.path.exists(output_path):
         return done
     try:
         with open(output_path, newline="", encoding="utf-8") as f:
             reader = csv.reader(f)
-            next(reader, None)  # header
+            next(reader, None)
             for row in reader:
                 if row:
                     done.add(row[0].strip().lower())
@@ -321,8 +582,6 @@ def load_done(output_path):
 
 
 class CsvSink:
-    """Piccolo wrapper attorno a csv.writer per poter fare flush del file."""
-
     def __init__(self, file_obj):
         self.file = file_obj
         self.writer = csv.writer(file_obj)
@@ -337,17 +596,16 @@ class CsvSink:
             pass
 
 
-async def worker(name, queue, session, sink, lock, timeout, max_pages, counters):
+async def worker(queue, scraper, session, sink, lock, counters, loop):
     while True:
         site = await queue.get()
         if site is None:
             queue.task_done()
             return
         try:
-            site, emails, status = await scrape_site(session, site, timeout, max_pages)
+            site, emails, status = await scraper.scrape_site(session, site, loop)
         except Exception as e:
             site, emails, status = site, set(), f"errore:{type(e).__name__}"
-
         async with lock:
             if emails:
                 for em in sorted(emails):
@@ -357,14 +615,11 @@ async def worker(name, queue, session, sink, lock, timeout, max_pages, counters)
             else:
                 sink.writerow([site, "", status])
             counters["done"] += 1
-            if counters["done"] % 50 == 0:
+            if counters["done"] % 25 == 0:
                 sink.flush()
-                print(
-                    f"  ...{counters['done']}/{counters['total']} siti | "
-                    f"{counters['with_email']} con email | "
-                    f"{counters['emails']} email totali",
-                    file=sys.stderr,
-                )
+                print(f"  ...{counters['done']}/{counters['total']} siti | "
+                      f"{counters['with_email']} con email | "
+                      f"{counters['emails']} email totali", file=sys.stderr)
         queue.task_done()
 
 
@@ -376,79 +631,87 @@ async def run(args):
 
     done = load_done(args.output)
     todo = [s for s in sites if s.strip().lower() not in done]
-
-    print(
-        f"Siti totali: {len(sites)} | già fatti: {len(done)} | "
-        f"da processare: {len(todo)}",
-        file=sys.stderr,
-    )
+    print(f"Siti totali: {len(sites)} | gia' fatti: {len(done)} | "
+          f"da processare: {len(todo)}", file=sys.stderr)
+    if args.render:
+        print("Render JavaScript: ATTIVO (fallback sui siti senza email)", file=sys.stderr)
+    if args.ocr:
+        print(f"OCR immagini: ATTIVO ({'tutte' if args.ocr_all else 'fallback'})",
+              file=sys.stderr)
     if not todo:
-        print("Tutti i siti sono già stati processati. Nulla da fare.", file=sys.stderr)
+        print("Tutti i siti sono gia' stati processati.", file=sys.stderr)
         return 0
 
-    # apri output in append se esiste, altrimenti scrivi header
     new_file = not os.path.exists(args.output) or os.path.getsize(args.output) == 0
     out_f = open(args.output, "a", newline="", encoding="utf-8")
     sink = CsvSink(out_f)
     if new_file:
         sink.writerow(["sito", "email", "stato"])
 
-    counters = {
-        "total": len(todo), "done": 0,
-        "with_email": 0, "emails": 0,
-    }
+    counters = {"total": len(todo), "done": 0, "with_email": 0, "emails": 0}
     lock = asyncio.Lock()
     queue = asyncio.Queue()
     for s in todo:
         queue.put_nowait(s)
 
+    scraper = Scraper(args)
+    loop = asyncio.get_event_loop()
     connector = aiohttp.TCPConnector(
-        limit=args.concurrency, ttl_dns_cache=300, force_close=True,
-        enable_cleanup_closed=True,
+        limit=args.concurrency, ttl_dns_cache=300,
+        force_close=True, enable_cleanup_closed=True,
     )
     async with aiohttp.ClientSession(headers=HEADERS, connector=connector) as session:
         workers = [
             asyncio.create_task(
-                worker(f"w{i}", queue, session, sink, lock,
-                       args.timeout, args.max_pages, counters)
-            )
-            for i in range(args.concurrency)
+                worker(queue, scraper, session, sink, lock, counters, loop))
+            for _ in range(args.concurrency)
         ]
         await queue.join()
         for _ in workers:
             queue.put_nowait(None)
         await asyncio.gather(*workers, return_exceptions=True)
 
+    await scraper.close()
     out_f.flush()
     out_f.close()
-    print(
-        f"\nFatto. {counters['done']} siti processati | "
-        f"{counters['with_email']} con almeno un'email | "
-        f"{counters['emails']} email totali trovate.\n"
-        f"Risultato salvato in: {args.output}",
-        file=sys.stderr,
-    )
+    print(f"\nFatto. {counters['done']} siti processati | "
+          f"{counters['with_email']} con almeno un'email | "
+          f"{counters['emails']} email totali.\n"
+          f"Risultato in: {args.output}", file=sys.stderr)
     return 0
 
 
 def main():
-    p = argparse.ArgumentParser(description="Estrae email da una lista di siti.")
-    p.add_argument("--input", "-i", default="siti.csv", help="CSV di ingresso")
-    p.add_argument("--output", "-o", default="emails.csv", help="CSV di uscita")
+    p = argparse.ArgumentParser(description="Estrae email da una lista di siti (versione potente).")
+    p.add_argument("--input", "-i", default="siti.csv")
+    p.add_argument("--output", "-o", default="emails.csv")
     p.add_argument("--column", "-c", default=None,
                    help="nome o indice colonna con i siti (default: auto)")
     p.add_argument("--concurrency", type=int, default=30,
-                   help="richieste in parallelo (default: 30)")
+                   help="richieste statiche in parallelo (default: 30)")
     p.add_argument("--timeout", type=int, default=15,
-                   help="timeout per richiesta in secondi (default: 15)")
-    p.add_argument("--max-pages", type=int, default=5,
-                   help="pagine massime per sito (default: 5)")
+                   help="timeout per pagina in secondi (default: 15)")
+    p.add_argument("--max-pages", type=int, default=8,
+                   help="pagine massime per sito (default: 8)")
+    # render
+    p.add_argument("--render", action="store_true",
+                   help="attiva il rendering JavaScript (browser headless)")
+    p.add_argument("--render-concurrency", type=int, default=6,
+                   help="browser/pagine in parallelo per il render (default: 6)")
+    # ocr
+    p.add_argument("--ocr", action="store_true",
+                   help="attiva l'OCR sulle immagini")
+    p.add_argument("--ocr-all", action="store_true",
+                   help="esegui OCR su tutti i siti, non solo quelli senza email")
+    p.add_argument("--ocr-max-images", type=int, default=6,
+                   help="immagini massime per sito su cui fare OCR (default: 6)")
+    p.add_argument("--ocr-workers", type=int, default=4,
+                   help="processi OCR in parallelo (default: 4)")
     args = p.parse_args()
 
     if not os.path.exists(args.input):
         print(f"File di input non trovato: {args.input}", file=sys.stderr)
         sys.exit(1)
-
     try:
         rc = asyncio.run(run(args))
     except KeyboardInterrupt:

@@ -8,6 +8,14 @@ on:
         description: "Nome del file CSV con i siti (caricato nel repo)"
         required: true
         default: "siti.csv"
+      potenza:
+        description: "Potenza dello scraper"
+        required: true
+        type: choice
+        default: "massima"
+        options:
+          - "massima"   # statico + render JavaScript + OCR immagini (piu' email, piu' lento)
+          - "base"      # solo download statico (piu' veloce)
       concurrency:
         description: "Siti in parallelo (piu' alto = piu' veloce)"
         required: true
@@ -15,7 +23,7 @@ on:
       max_pages:
         description: "Pagine massime per sito (home + contatti)"
         required: true
-        default: "5"
+        default: "8"
       timeout:
         description: "Timeout per pagina in secondi"
         required: true
@@ -37,8 +45,16 @@ jobs:
         with:
           python-version: "3.11"
 
-      - name: Installa le dipendenze
+      - name: Installa le dipendenze Python
         run: pip install -r requirements.txt
+
+      - name: Installa il browser per il render JavaScript
+        if: ${{ inputs.potenza == 'massima' }}
+        run: python -m playwright install --with-deps chromium
+
+      - name: Installa Tesseract per l'OCR (lettura email dalle immagini)
+        if: ${{ inputs.potenza == 'massima' }}
+        run: sudo apt-get update && sudo apt-get install -y tesseract-ocr tesseract-ocr-ita
 
       - name: Controlla che il file dei siti esista
         run: |
@@ -50,12 +66,18 @@ jobs:
 
       - name: Esegui lo scraper
         run: |
+          EXTRA=""
+          if [ "${{ inputs.potenza }}" = "massima" ]; then
+            EXTRA="--render --ocr"
+          fi
+          echo "Modalita': ${{ inputs.potenza }}  (opzioni: $EXTRA)"
           python scraper.py \
             --input "${{ inputs.file_input }}" \
             --output emails.csv \
             --concurrency "${{ inputs.concurrency }}" \
             --max-pages "${{ inputs.max_pages }}" \
-            --timeout "${{ inputs.timeout }}"
+            --timeout "${{ inputs.timeout }}" \
+            $EXTRA
 
       - name: Riepilogo risultati
         if: always()

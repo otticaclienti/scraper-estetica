@@ -1,8 +1,19 @@
 # Scraper email da lista di siti
 
 Estrae tutte le email da una lista di siti web (anche migliaia). Per ogni sito
-scarica la homepage e le pagine "contatti / chi siamo / privacy", cerca le email
-nel testo e nei link `mailto:`, e salva tutto in un CSV.
+scarica la homepage e le pagine "contatti / chi siamo / privacy" e cerca le email
+con molte tecniche, per trovarne il più possibile:
+
+- testo normale, link `mailto:` (anche con `%40` al posto di `@`)
+- entità HTML (`&#64;` = @) e caratteri invisibili
+- **offuscamento Cloudflare** (`data-cfemail` / `cdn-cgi/email-protection`)
+- offuscamenti testuali: `info [at] sito [punto] it`, `(at)`, `chiocciola`, `dot`
+- email costruite via **JavaScript** (`"info" + "@" + "sito.it"`)
+- **render JavaScript** con browser headless (email caricate dinamicamente)
+- **OCR** sulle immagini (email messe come foto)
+
+Salva tutto in un CSV con colonne `sito, email, stato` (lo `stato` dice con quale
+metodo è stata trovata: `statico`, `render`, `ocr`).
 
 > 🟢 **Vuoi usarlo dal browser, gratis e senza installare niente?**
 > Segui la **[GUIDA.md](GUIDA.md)**: carichi il CSV su GitHub, premi un pulsante
@@ -64,11 +75,23 @@ presenti in `emails.csv` e riparte da dove era rimasto.
 | `--timeout` | `15` | Secondi massimi di attesa per pagina |
 | `--max-pages` | `5` | Pagine massime visitate per sito (home + contatti) |
 
-Esempio più veloce:
+Esempio più veloce (solo statico):
 
 ```bash
 python3 scraper.py -i siti.csv -o emails.csv --concurrency 50
 ```
+
+Massima potenza (render JavaScript + OCR, più lento ma trova di più):
+
+```bash
+python3 scraper.py -i siti.csv -o emails.csv --render --ocr
+```
+
+| Opzione potenza | Descrizione |
+|-----------------|-------------|
+| `--render` | apre i siti con un browser headless per le email caricate via JS |
+| `--ocr` | legge le email messe come immagini (fallback sui siti senza email) |
+| `--ocr-all` | esegue l'OCR su tutti i siti, non solo quelli senza email (molto più lento) |
 
 Specificare la colonna a mano (se l'auto-detect sbaglia):
 

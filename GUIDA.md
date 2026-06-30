@@ -28,8 +28,18 @@ Risultato finale: scarichi un file `emails.csv` con i siti e le email trovate.
 4. Si apre un piccolo riquadro:
    - **branch**: scegli `claude/extract-emails-7k-sites-wztsbl`
    - **Nome del file CSV**: lascia `siti.csv` (o scrivi il nome che hai usato)
+   - **Potenza**: lascia `massima` per trovare il massimo delle email (usa anche
+     render JavaScript e OCR sulle immagini). Scegli `base` solo se vuoi andare
+     molto più veloce accontentandoti del download semplice.
    - gli altri campi puoi lasciarli così come sono
 5. Premi il pulsante verde **Run workflow**.
+
+> ⚙️ **Cosa fa la modalità "massima"** per trovare quante più email possibile:
+> oltre al testo normale, decodifica le email protette da Cloudflare, le entità
+> HTML, gli offuscamenti tipo `info [at] sito [punto] it`, quelle costruite via
+> JavaScript, **apre i siti con un vero browser** (per le email caricate
+> dinamicamente) e **legge le email messe come immagini con l'OCR**. È più lenta
+> ma molto più completa.
 
 Parte tutto da solo. ☕
 

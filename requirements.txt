@@ -1,2 +1,7 @@
 aiohttp>=3.9
 beautifulsoup4>=4.12
+# Render JavaScript (browser headless) per le email caricate dinamicamente
+playwright>=1.40
+# OCR per leggere le email messe come immagini
+pytesseract>=0.3.10
+Pillow>=10.0
