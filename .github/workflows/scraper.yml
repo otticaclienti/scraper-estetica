@@ -1,6 +1,7 @@
 name: Estrai email dai siti
 
-# Si avvia a mano dalla scheda "Actions" del repo (pulsante "Run workflow").
+# Si avvia a mano dalla scheda "Actions" del repo (pulsante "Run workflow")
+# oppure dalla Dashboard.
 on:
   workflow_dispatch:
     inputs:
@@ -28,6 +29,10 @@ on:
         description: "Timeout per pagina in secondi"
         required: true
         default: "15"
+  # TEST TEMPORANEO: avvio automatico al push del file di prova (rimosso dopo la verifica)
+  push:
+    branches: ["claude/extract-emails-7k-sites-wztsbl"]
+    paths: ["siti.csv", ".github/workflows/scraper.yml"]
 
 permissions:
   contents: write   # serve per pubblicare progresso e risultati sul branch "risultati"
@@ -43,6 +48,14 @@ jobs:
       - name: Scarica il codice del repo
         uses: actions/checkout@v4
 
+      - name: Imposta i parametri (con valori predefiniti)
+        run: |
+          echo "FILE=${{ inputs.file_input || 'siti.csv' }}" >> $GITHUB_ENV
+          echo "POT=${{ inputs.potenza || 'massima' }}" >> $GITHUB_ENV
+          echo "CONC=${{ inputs.concurrency || '30' }}" >> $GITHUB_ENV
+          echo "PAGES=${{ inputs.max_pages || '8' }}" >> $GITHUB_ENV
+          echo "TO=${{ inputs.timeout || '15' }}" >> $GITHUB_ENV
+
       - name: Prepara Python
         uses: actions/setup-python@v5
         with:
@@ -52,20 +65,20 @@ jobs:
         run: pip install -r requirements.txt
 
       - name: Installa il browser per il render JavaScript
-        if: ${{ inputs.potenza == 'massima' }}
+        if: ${{ env.POT != 'base' }}
         run: python -m playwright install --with-deps chromium
 
       - name: Installa Tesseract per l'OCR (lettura email dalle immagini)
-        if: ${{ inputs.potenza == 'massima' }}
+        if: ${{ env.POT != 'base' }}
         run: sudo apt-get update && sudo apt-get install -y tesseract-ocr tesseract-ocr-ita
 
       - name: Controlla che il file dei siti esista
         run: |
-          if [ ! -f "${{ inputs.file_input }}" ]; then
-            echo "::error::Il file '${{ inputs.file_input }}' non esiste nel repo. Caricalo prima (Add file -> Upload files) e riprova."
+          if [ ! -f "$FILE" ]; then
+            echo "::error::Il file '$FILE' non esiste nel repo. Caricalo prima (Add file -> Upload files) e riprova."
             exit 1
           fi
-          echo "Trovato il file: ${{ inputs.file_input }}"
+          echo "Trovato il file: $FILE"
 
       - name: Prepara il branch "risultati" (per la dashboard)
         env:
@@ -104,18 +117,18 @@ jobs:
           COMMITTER=$!
 
           EXTRA=""
-          if [ "${{ inputs.potenza }}" = "massima" ]; then
+          if [ "$POT" = "massima" ]; then
             EXTRA="--render --ocr"
           fi
-          echo "Modalita': ${{ inputs.potenza }}  (opzioni: $EXTRA)"
+          echo "Modalita': $POT  (opzioni: $EXTRA)"
           set +e
           python scraper.py \
-            --input "${{ inputs.file_input }}" \
+            --input "$FILE" \
             --output emails.csv \
             --progress-file progress.json \
-            --concurrency "${{ inputs.concurrency }}" \
-            --max-pages "${{ inputs.max_pages }}" \
-            --timeout "${{ inputs.timeout }}" \
+            --concurrency "$CONC" \
+            --max-pages "$PAGES" \
+            --timeout "$TO" \
             $EXTRA
           RC=$?
           set -e
