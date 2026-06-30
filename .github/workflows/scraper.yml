@@ -29,6 +29,10 @@ on:
         description: "Timeout per pagina in secondi"
         required: true
         default: "15"
+  # TEST TEMPORANEO (rimosso dopo la verifica del campione)
+  push:
+    branches: ["claude/extract-emails-7k-sites-wztsbl"]
+    paths: ["siti.csv"]
 
 permissions:
   contents: write   # serve per pubblicare progresso e risultati sul branch "risultati"
