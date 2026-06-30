@@ -1,7 +1,7 @@
 name: Estrai email dai siti
 
 # Si avvia a mano dalla scheda "Actions" del repo (pulsante "Run workflow")
-# oppure dalla Dashboard.
+# oppure dalla Dashboard. (riavvio con scraper corretto: fix backtracking)
 on:
   workflow_dispatch:
     inputs:

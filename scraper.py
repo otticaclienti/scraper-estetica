@@ -157,16 +157,20 @@ def clean_emails(raw_emails):
 
 
 def _deobfuscate_text(text):
-    """Sostituisce gli offuscamenti testuali piu' comuni con @ e . ."""
+    """Sostituisce gli offuscamenti testuali piu' comuni con @ e . .
+
+    Gli spazi sono limitati (\\s{0,3} / \\s{1,3}) di proposito: i quantificatori
+    illimitati causavano backtracking catastrofico (e blocco) su pagine con
+    lunghe sequenze di spazi."""
     t = text
     # @  ->  varianti
-    t = re.sub(r"\s*[\(\[\{<]\s*(?:at|chiocciola|arobase|apestaartje)\s*[\)\]\}>]\s*",
+    t = re.sub(r"\s{0,3}[\(\[\{<]\s{0,3}(?:at|chiocciola|arobase|apestaartje)\s{0,3}[\)\]\}>]\s{0,3}",
                "@", t, flags=re.IGNORECASE)
-    t = re.sub(r"\s+(?:at|chiocciola)\s+", "@", t, flags=re.IGNORECASE)
+    t = re.sub(r"\s{1,3}(?:at|chiocciola)\s{1,3}", "@", t, flags=re.IGNORECASE)
     # .  ->  varianti
-    t = re.sub(r"\s*[\(\[\{<]\s*(?:dot|punto|point)\s*[\)\]\}>]\s*",
+    t = re.sub(r"\s{0,3}[\(\[\{<]\s{0,3}(?:dot|punto|point)\s{0,3}[\)\]\}>]\s{0,3}",
                ".", t, flags=re.IGNORECASE)
-    t = re.sub(r"\s+(?:dot|punto)\s+", ".", t, flags=re.IGNORECASE)
+    t = re.sub(r"\s{1,3}(?:dot|punto)\s{1,3}", ".", t, flags=re.IGNORECASE)
     return t
 
 
@@ -174,6 +178,10 @@ def extract_emails_from_html(html, base_url=None):
     """Estrae email da una pagina HTML con molte tecniche."""
     if not html:
         return set(), []
+    # limita la dimensione elaborata: protegge da pagine enormi che
+    # rallenterebbero parsing e regex (le email utili sono comunque nel testo)
+    if len(html) > 1_500_000:
+        html = html[:1_500_000]
 
     found = set()
 
@@ -692,12 +700,14 @@ async def worker(queue, scraper, session, sink, lock, counters, loop):
             else:
                 sink.writerow([site, "", status])
             counters["done"] += 1
-            if counters["done"] % 25 == 0:
+            # aggiorna progresso e file di frequente (visibilita' in tempo reale)
+            if counters["done"] % 5 == 0:
                 sink.flush()
+                write_progress(counters.get("progress_file"), counters)
+            if counters["done"] % 25 == 0:
                 print(f"  ...{counters['done']}/{counters['total']} siti | "
                       f"{counters['with_email']} con email | "
                       f"{counters['emails']} email totali", file=sys.stderr)
-                write_progress(counters.get("progress_file"), counters)
         queue.task_done()
 
 
