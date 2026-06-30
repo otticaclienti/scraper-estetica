@@ -69,6 +69,34 @@ ZERO_WIDTH = dict.fromkeys(
     map(ord, "​‌‍⁠﻿­"), None
 )
 
+# TLD comuni: usati per "ritagliare" un dominio quando del testo si incolla
+# subito dopo (es. "info@sito.itorario" -> "info@sito.it").
+COMMON_TLDS = [
+    "com", "it", "org", "net", "eu", "info", "biz", "name", "pro", "shop",
+    "online", "store", "site", "cloud", "app", "io", "co", "tv", "me",
+    "fr", "de", "es", "uk", "ch", "at", "be", "nl", "us", "email",
+    # TLD piu' lunghi ma reali: vanno protetti dal "ritaglio"
+    "company", "center", "group", "clinic", "studio", "salon", "beauty",
+    "design", "academy", "digital", "events", "care", "life", "world",
+    "agency", "solutions", "srl", "moda", "boutique", "club", "fit",
+]
+COMMON_TLDS_SET = set(COMMON_TLDS)
+COMMON_TLDS_BYLEN = sorted(COMMON_TLDS, key=len, reverse=True)
+
+
+def _fix_glued_tld(domain):
+    """Se l'ultima etichetta e' un TLD noto seguito da una parola incollata,
+    taglia alla fine del TLD (es. 'sito.itorario' -> 'sito.it')."""
+    parts = domain.split(".")
+    last = parts[-1]
+    if last in COMMON_TLDS_SET:
+        return domain
+    for tld in COMMON_TLDS_BYLEN:
+        if last.startswith(tld) and len(last) > len(tld) and last[len(tld):].isalpha():
+            parts[-1] = tld
+            return ".".join(parts)
+    return domain
+
 
 def decode_cfemail(hexstr):
     """Decodifica una stringa Cloudflare email-protection (esadecimale)."""
@@ -102,6 +130,8 @@ def clean_emails(raw_emails):
         local, _, domain = e.partition("@")
         if not local or not domain or "." not in domain:
             continue
+        domain = _fix_glued_tld(domain)
+        e = local + "@" + domain
         if e.endswith(BAD_DOMAIN_SUFFIXES):
             continue
         if local in JUNK_LOCAL_PARTS:
