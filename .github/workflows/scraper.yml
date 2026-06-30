@@ -69,7 +69,7 @@ jobs:
         run: python -m playwright install --with-deps chromium
 
       - name: Installa Tesseract per l'OCR (lettura email dalle immagini)
-        if: ${{ env.POT != 'base' }}
+        if: ${{ false }}   # OCR disabilitato sui giri grandi (vedi step scraper)
         run: sudo apt-get update && sudo apt-get install -y tesseract-ocr tesseract-ocr-ita
 
       - name: Controlla che il file dei siti esista
@@ -128,7 +128,8 @@ jobs:
 
           EXTRA=""
           if [ "$POT" = "massima" ]; then
-            EXTRA="--render --ocr"
+            # OCR disabilitato sui giri grandi: 0 email nel campione, alto rischio.
+            EXTRA="--render"
           fi
           echo "Modalita': $POT  (opzioni: $EXTRA)"
           set +e

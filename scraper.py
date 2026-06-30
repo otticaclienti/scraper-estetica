@@ -428,7 +428,12 @@ class Scraper:
         try:
             import pytesseract
             from PIL import Image, ImageOps
+            # protezione contro immagini "bomba" (decompression bomb)
+            Image.MAX_IMAGE_PIXELS = 30_000_000
             img = Image.open(io.BytesIO(data))
+            # scarta immagini enormi (troppo costose / pericolose)
+            if img.width * img.height > 30_000_000 or max(img.width, img.height) > 8000:
+                return ""
             img = img.convert("L")
             img = ImageOps.autocontrast(img)
             # ingrandisci immagini piccole per leggere meglio
@@ -488,14 +493,15 @@ class Scraper:
                 return site, set(), "irraggiungibile"
 
         base = final_url or url
-        e, imgs = extract_emails_from_html(html, base)
+        e, imgs = await loop.run_in_executor(None, extract_emails_from_html, html, base)
         emails |= e
         all_images += imgs
         if e:
             methods.add("statico")
 
         # pagine da visitare: link contatti + percorsi tipici
-        links = pick_contact_links(base, html, self.max_pages)
+        links = await loop.run_in_executor(
+            None, pick_contact_links, base, html, self.max_pages)
         link_paths = {urlparse(l).path.lower().rstrip("/") for l in links}
         root = "{0.scheme}://{0.netloc}".format(urlparse(base))
         for gp in GUESS_PATHS:
@@ -508,7 +514,8 @@ class Scraper:
         for link in links[:self.max_pages]:
             chtml, _ = await self.fetch(session, link)
             if chtml:
-                e, imgs = extract_emails_from_html(chtml, link)
+                e, imgs = await loop.run_in_executor(
+                    None, extract_emails_from_html, chtml, link)
                 if e:
                     emails |= e
                     methods.add("statico")
@@ -518,7 +525,8 @@ class Scraper:
         if self.use_render and not emails:
             rhtml = await self.render(base)
             if rhtml:
-                e, imgs = extract_emails_from_html(rhtml, base)
+                e, imgs = await loop.run_in_executor(
+                    None, extract_emails_from_html, rhtml, base)
                 if e:
                     emails |= e
                     methods.add("render")
@@ -527,7 +535,8 @@ class Scraper:
             if not emails and links:
                 rhtml = await self.render(links[0])
                 if rhtml:
-                    e, imgs = extract_emails_from_html(rhtml, links[0])
+                    e, imgs = await loop.run_in_executor(
+                        None, extract_emails_from_html, rhtml, links[0])
                     if e:
                         emails |= e
                         methods.add("render")
