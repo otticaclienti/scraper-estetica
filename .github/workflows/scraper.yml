@@ -29,10 +29,6 @@ on:
         description: "Timeout per pagina in secondi"
         required: true
         default: "15"
-  # TEST TEMPORANEO: avvio automatico al push del file di prova (rimosso dopo la verifica)
-  push:
-    branches: ["claude/extract-emails-7k-sites-wztsbl"]
-    paths: ["siti.csv", ".github/workflows/scraper.yml"]
 
 permissions:
   contents: write   # serve per pubblicare progresso e risultati sul branch "risultati"
