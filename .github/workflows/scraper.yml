@@ -29,10 +29,6 @@ on:
         description: "Timeout per pagina in secondi"
         required: true
         default: "15"
-  # avvio del giro completo (verra' rimosso a fine elaborazione)
-  push:
-    branches: ["claude/extract-emails-7k-sites-wztsbl"]
-    paths: [".github/workflows/scraper.yml"]
 
 permissions:
   contents: write   # serve per pubblicare progresso e risultati sul branch "risultati"
@@ -114,14 +110,18 @@ jobs:
         run: |
           PUB="$RUNNER_TEMP/pub"
 
-          # committer in background: ogni 20s pubblica progresso e risultati parziali
+          # committer in background: ogni 20s pubblica progresso e risultati parziali.
+          # Ogni operazione git ha un timeout: un push lento NON deve mai
+          # bloccare la pubblicazione del progresso.
           (
             while true; do
               sleep 20
               cp -f progress.json "$PUB/progress.json" 2>/dev/null || true
               cp -f emails.csv "$PUB/emails.csv" 2>/dev/null || true
-              ( cd "$PUB" && git add -A && git commit -q -m "progresso" >/dev/null 2>&1 \
-                  && git push -q -f origin risultati >/dev/null 2>&1 ) || true
+              ( cd "$PUB" \
+                  && timeout 25 git add -A >/dev/null 2>&1 \
+                  && timeout 25 git commit -q -m "progresso" >/dev/null 2>&1 \
+                  && timeout 40 git push -q -f origin risultati >/dev/null 2>&1 ) || true
             done
           ) &
           COMMITTER=$!
@@ -148,8 +148,10 @@ jobs:
           kill $COMMITTER 2>/dev/null || true
           cp -f progress.json "$PUB/progress.json" 2>/dev/null || true
           cp -f emails.csv "$PUB/emails.csv" 2>/dev/null || true
-          ( cd "$PUB" && git add -A && git commit -q -m "risultato finale" >/dev/null 2>&1 \
-              && git push -q -f origin risultati >/dev/null 2>&1 ) || true
+          ( cd "$PUB" \
+              && timeout 25 git add -A >/dev/null 2>&1 \
+              && timeout 25 git commit -q -m "risultato finale" >/dev/null 2>&1 \
+              && timeout 60 git push -q -f origin risultati >/dev/null 2>&1 ) || true
           exit $RC
 
       - name: Riepilogo risultati

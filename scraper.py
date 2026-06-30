@@ -797,13 +797,13 @@ def main():
                    help="pagine massime per sito (default: 8)")
     p.add_argument("--progress-file", default=None,
                    help="scrive l'avanzamento in un file JSON (per la dashboard)")
-    p.add_argument("--site-timeout", type=int, default=90,
-                   help="tempo massimo per singolo sito in secondi (default: 90)")
+    p.add_argument("--site-timeout", type=int, default=60,
+                   help="tempo massimo per singolo sito in secondi (default: 60)")
     # render
     p.add_argument("--render", action="store_true",
                    help="attiva il rendering JavaScript (browser headless)")
-    p.add_argument("--render-concurrency", type=int, default=6,
-                   help="browser/pagine in parallelo per il render (default: 6)")
+    p.add_argument("--render-concurrency", type=int, default=10,
+                   help="browser/pagine in parallelo per il render (default: 10)")
     # ocr
     p.add_argument("--ocr", action="store_true",
                    help="attiva l'OCR sulle immagini")
