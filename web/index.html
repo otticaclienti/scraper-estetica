@@ -1,0 +1,304 @@
+<!DOCTYPE html>
+<html lang="it">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Scraper Email — Estrazione contatti</title>
+<style>
+  :root{
+    --bg:#0f1226; --bg2:#161a3a; --card:#1b2147; --card2:#232a5c;
+    --txt:#eef1ff; --muted:#9aa3d4; --line:#2c3470;
+    --accent:#6c8cff; --accent2:#8b5cff; --ok:#27d796; --warn:#ffd166; --err:#ff6b8b;
+  }
+  *{box-sizing:border-box}
+  body{margin:0;font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;
+    background:linear-gradient(135deg,#0f1226,#1a1140 60%,#0f1226);color:var(--txt);min-height:100vh}
+  .wrap{max-width:960px;margin:0 auto;padding:28px 20px 60px}
+  header{display:flex;align-items:center;gap:14px;margin-bottom:6px}
+  .logo{width:46px;height:46px;border-radius:13px;background:linear-gradient(135deg,var(--accent),var(--accent2));
+    display:flex;align-items:center;justify-content:center;font-size:24px;box-shadow:0 6px 24px rgba(108,140,255,.4)}
+  h1{font-size:24px;margin:0;font-weight:700;letter-spacing:.3px}
+  .sub{color:var(--muted);font-size:14px;margin:2px 0 24px 60px}
+  .card{background:linear-gradient(180deg,var(--card),var(--bg2));border:1px solid var(--line);
+    border-radius:18px;padding:22px;margin-bottom:20px;box-shadow:0 10px 40px rgba(0,0,0,.25)}
+  .step{display:flex;align-items:center;gap:10px;font-weight:600;margin-bottom:14px;font-size:15px}
+  .num{width:26px;height:26px;border-radius:50%;background:var(--accent);color:#fff;display:flex;
+    align-items:center;justify-content:center;font-size:14px;font-weight:700;flex:0 0 auto}
+
+  /* dropzone */
+  .drop{border:2px dashed var(--line);border-radius:14px;padding:34px;text-align:center;cursor:pointer;
+    transition:.18s;background:rgba(255,255,255,.02)}
+  .drop:hover,.drop.over{border-color:var(--accent);background:rgba(108,140,255,.08)}
+  .drop .big{font-size:42px;margin-bottom:8px}
+  .drop .hint{color:var(--muted);font-size:13px;margin-top:6px}
+  .badge{display:inline-flex;align-items:center;gap:8px;background:rgba(39,215,150,.14);
+    color:var(--ok);border:1px solid rgba(39,215,150,.4);border-radius:10px;padding:8px 14px;font-weight:600;font-size:14px}
+
+  /* options */
+  .row{display:flex;gap:16px;flex-wrap:wrap;align-items:center}
+  .opt{flex:1;min-width:200px}
+  label.lbl{display:block;color:var(--muted);font-size:13px;margin-bottom:8px;font-weight:600}
+  .seg{display:flex;background:var(--bg);border:1px solid var(--line);border-radius:12px;overflow:hidden}
+  .seg button{flex:1;background:none;border:none;color:var(--muted);padding:12px;font-size:14px;
+    cursor:pointer;font-weight:600;transition:.15s}
+  .seg button.on{background:linear-gradient(135deg,var(--accent),var(--accent2));color:#fff}
+  select,input[type=number]{width:100%;background:var(--bg);border:1px solid var(--line);color:var(--txt);
+    border-radius:12px;padding:12px;font-size:14px}
+  .caps{font-size:12.5px;color:var(--muted);margin-top:10px;line-height:1.6}
+  .cap-on{color:var(--ok)} .cap-off{color:var(--warn)}
+
+  /* buttons */
+  .btn{display:inline-flex;align-items:center;justify-content:center;gap:9px;border:none;border-radius:13px;
+    padding:15px 26px;font-size:16px;font-weight:700;cursor:pointer;transition:.15s;color:#fff;
+    background:linear-gradient(135deg,var(--accent),var(--accent2));box-shadow:0 8px 26px rgba(108,140,255,.4)}
+  .btn:hover{transform:translateY(-1px)} .btn:disabled{opacity:.45;cursor:not-allowed;transform:none}
+  .btn.ghost{background:transparent;border:1px solid var(--line);box-shadow:none;color:var(--txt)}
+  .btn.ok{background:linear-gradient(135deg,#27d796,#13b87a)}
+  .btn.stop{background:linear-gradient(135deg,#ff6b8b,#d63a63);box-shadow:0 8px 26px rgba(255,107,139,.35)}
+
+  /* progress */
+  .pbar{height:16px;background:var(--bg);border-radius:20px;overflow:hidden;border:1px solid var(--line)}
+  .pfill{height:100%;width:0;background:linear-gradient(90deg,var(--accent),var(--accent2),var(--ok));
+    border-radius:20px;transition:width .5s ease}
+  .pfill.anim{background-size:200% 100%;animation:flow 2s linear infinite}
+  @keyframes flow{to{background-position:200% 0}}
+  .stats{display:grid;grid-template-columns:repeat(4,1fr);gap:12px;margin:18px 0}
+  .stat{background:var(--bg);border:1px solid var(--line);border-radius:14px;padding:16px;text-align:center}
+  .stat .v{font-size:26px;font-weight:800;letter-spacing:.5px}
+  .stat .k{font-size:12px;color:var(--muted);margin-top:4px}
+  .pct{font-variant-numeric:tabular-nums}
+  .live{display:flex;align-items:center;gap:8px;font-size:13px;color:var(--muted)}
+  .dot{width:9px;height:9px;border-radius:50%;background:var(--ok);box-shadow:0 0 0 0 rgba(39,215,150,.7);
+    animation:pulse 1.4s infinite}
+  @keyframes pulse{0%{box-shadow:0 0 0 0 rgba(39,215,150,.6)}70%{box-shadow:0 0 0 9px rgba(39,215,150,0)}}
+
+  /* table */
+  table{width:100%;border-collapse:collapse;font-size:13.5px}
+  th,td{text-align:left;padding:10px 12px;border-bottom:1px solid var(--line)}
+  th{color:var(--muted);font-weight:600;font-size:12px;text-transform:uppercase;letter-spacing:.5px}
+  td.em{color:var(--ok);font-weight:600}
+  .tag{font-size:11px;padding:3px 9px;border-radius:20px;background:var(--card2);color:var(--muted)}
+  .tablewrap{max-height:360px;overflow:auto;border:1px solid var(--line);border-radius:12px;margin-top:8px}
+  .hidden{display:none}
+  .muted{color:var(--muted);font-size:13px}
+  .err{color:var(--err);font-weight:600;margin-top:10px}
+  .toast{position:fixed;bottom:24px;left:50%;transform:translateX(-50%);background:var(--card2);
+    border:1px solid var(--line);padding:12px 20px;border-radius:12px;opacity:0;transition:.3s;pointer-events:none}
+  .toast.show{opacity:1}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header>
+    <div class="logo">📧</div>
+    <h1>Scraper Email</h1>
+  </header>
+  <div class="sub">Carica la lista dei siti e guarda le email comparire in tempo reale.</div>
+
+  <!-- STEP 1: upload -->
+  <div class="card">
+    <div class="step"><span class="num">1</span> Carica la lista dei siti (CSV)</div>
+    <div id="drop" class="drop">
+      <div class="big">📁</div>
+      <div><b>Trascina qui</b> il file CSV, oppure clicca per sceglierlo</div>
+      <div class="hint">Basta una colonna con i siti. Va bene anche con più colonne (la trovo da solo).</div>
+      <input type="file" id="file" accept=".csv,.txt" class="hidden">
+    </div>
+    <div id="uploaded" class="hidden" style="margin-top:14px">
+      <span class="badge">✓ <span id="upname"></span> — <b id="upcount"></b>&nbsp;siti caricati</span>
+    </div>
+  </div>
+
+  <!-- STEP 2: options + start -->
+  <div class="card" id="optcard">
+    <div class="step"><span class="num">2</span> Scegli la potenza e avvia</div>
+    <div class="row">
+      <div class="opt">
+        <label class="lbl">Potenza dello scraper</label>
+        <div class="seg" id="powerseg">
+          <button data-v="massima" class="on">🚀 Massima</button>
+          <button data-v="base">⚡ Base (veloce)</button>
+        </div>
+        <div class="caps" id="caps"></div>
+      </div>
+      <div class="opt" style="max-width:200px">
+        <label class="lbl">Siti in parallelo</label>
+        <input type="number" id="conc" value="30" min="1" max="200">
+        <div class="caps">Più alto = più veloce (occhio alla rete).</div>
+      </div>
+    </div>
+    <div style="margin-top:20px;display:flex;gap:12px;flex-wrap:wrap">
+      <button class="btn" id="startBtn" disabled>▶ Avvia scraping</button>
+      <button class="btn ghost hidden" id="resumeBtn">⟳ Riprendi (dai mancanti)</button>
+    </div>
+    <div class="err hidden" id="optErr"></div>
+  </div>
+
+  <!-- STEP 3: progress -->
+  <div class="card hidden" id="progcard">
+    <div class="step" style="justify-content:space-between">
+      <span><span class="num">3</span> Avanzamento</span>
+      <span class="live hidden" id="liveTag"><span class="dot"></span> in corso</span>
+    </div>
+    <div class="pbar"><div class="pfill" id="pfill"></div></div>
+    <div style="display:flex;justify-content:space-between;margin-top:8px" class="muted">
+      <span><b class="pct" id="pctTxt">0%</b> completato</span>
+      <span id="etaTxt"></span>
+    </div>
+    <div class="stats">
+      <div class="stat"><div class="v" id="sDone">0</div><div class="k">Siti analizzati</div></div>
+      <div class="stat"><div class="v" id="sTotal">0</div><div class="k">Siti totali</div></div>
+      <div class="stat"><div class="v" style="color:var(--ok)" id="sWith">0</div><div class="k">Siti con email</div></div>
+      <div class="stat"><div class="v" style="color:var(--accent)" id="sMail">0</div><div class="k">Email trovate</div></div>
+    </div>
+    <div style="display:flex;gap:12px;flex-wrap:wrap;align-items:center">
+      <button class="btn ok hidden" id="dlBtn">⬇ Scarica emails.csv</button>
+      <button class="btn stop hidden" id="stopBtn">■ Ferma</button>
+      <span class="muted" id="statusMsg"></span>
+    </div>
+
+    <div style="margin-top:22px">
+      <div class="step" style="font-size:14px"><span>📋 Email trovate (live)</span></div>
+      <div class="tablewrap">
+        <table>
+          <thead><tr><th>Sito</th><th>Email</th><th>Metodo</th></tr></thead>
+          <tbody id="rows"><tr><td colspan="3" class="muted" style="text-align:center;padding:24px">
+            Le email compariranno qui mentre lo scraper lavora…</td></tr></tbody>
+        </table>
+      </div>
+    </div>
+  </div>
+</div>
+
+<div class="toast" id="toast"></div>
+
+<script>
+const $ = s => document.querySelector(s);
+let power = "massima", uploaded = false, polling = null, caps = {tesseract:false, playwright:false};
+
+function toast(msg){const t=$("#toast");t.textContent=msg;t.classList.add("show");
+  setTimeout(()=>t.classList.remove("show"),2600);}
+
+// capabilities
+fetch("/api/capabilities").then(r=>r.json()).then(c=>{caps=c;renderCaps();});
+function renderCaps(){
+  if(power==="base"){ $("#caps").innerHTML="Solo download rapido del sito (HTML). Più veloce, ma trova meno email."; return; }
+  const r = caps.playwright ? "<span class='cap-on'>✓ attivo</span>" : "<span class='cap-off'>non disponibile</span>";
+  const o = caps.tesseract ? "<span class='cap-on'>✓ attivo</span>" : "<span class='cap-off'>non disponibile (manca Tesseract)</span>";
+  $("#caps").innerHTML = `Tecniche: testo, Cloudflare, entità, offuscamenti, JavaScript ·
+    <b>Render JS</b> ${r} · <b>OCR immagini</b> ${o}`;
+}
+
+// power toggle
+$("#powerseg").addEventListener("click",e=>{
+  const b=e.target.closest("button"); if(!b)return;
+  [...$("#powerseg").children].forEach(x=>x.classList.remove("on"));
+  b.classList.add("on"); power=b.dataset.v; renderCaps();
+});
+
+// upload via click + drag
+const drop=$("#drop"), fileInput=$("#file");
+drop.addEventListener("click",()=>fileInput.click());
+fileInput.addEventListener("change",()=>{ if(fileInput.files[0]) doUpload(fileInput.files[0]); });
+["dragover","dragenter"].forEach(ev=>drop.addEventListener(ev,e=>{e.preventDefault();drop.classList.add("over");}));
+["dragleave","drop"].forEach(ev=>drop.addEventListener(ev,e=>{e.preventDefault();drop.classList.remove("over");}));
+drop.addEventListener("drop",e=>{ const f=e.dataTransfer.files[0]; if(f) doUpload(f); });
+
+function doUpload(file){
+  const fd=new FormData(); fd.append("file",file);
+  toast("Carico "+file.name+"…");
+  fetch("/api/upload",{method:"POST",body:fd}).then(r=>r.json()).then(d=>{
+    if(!d.ok){ toast("Errore: "+d.error); return; }
+    uploaded=true;
+    $("#upname").textContent=d.filename; $("#upcount").textContent=d.count.toLocaleString("it-IT");
+    $("#uploaded").classList.remove("hidden");
+    $("#startBtn").disabled=false;
+    toast("Caricati "+d.count+" siti ✓");
+  }).catch(()=>toast("Errore di rete durante l'upload"));
+}
+
+// start / resume
+$("#startBtn").addEventListener("click",()=>start(false));
+$("#resumeBtn").addEventListener("click",()=>start(true));
+function start(resume){
+  $("#optErr").classList.add("hidden");
+  const body={power, concurrency:parseInt($("#conc").value||"30"), resume};
+  fetch("/api/start",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify(body)})
+   .then(r=>r.json()).then(d=>{
+     if(!d.ok){ $("#optErr").textContent=d.error; $("#optErr").classList.remove("hidden"); return; }
+     $("#progcard").classList.remove("hidden");
+     $("#liveTag").classList.remove("hidden");
+     $("#stopBtn").classList.remove("hidden");
+     $("#dlBtn").classList.add("hidden");
+     $("#resumeBtn").classList.add("hidden");
+     $("#startBtn").disabled=true;
+     $("#pfill").classList.add("anim");
+     $("#rows").innerHTML="";
+     $("#progcard").scrollIntoView({behavior:"smooth"});
+     startPolling();
+   });
+}
+
+$("#stopBtn").addEventListener("click",()=>{
+  fetch("/api/stop",{method:"POST"}).then(()=>toast("Interrotto"));
+});
+$("#dlBtn").addEventListener("click",()=>{ window.location="/api/download"; });
+
+function fmtTime(s){ if(!s||s<0)return"";
+  const h=Math.floor(s/3600),m=Math.floor((s%3600)/60),ss=s%60;
+  return (h?h+"h ":"")+(m?m+"m ":"")+ss+"s"; }
+
+function startPolling(){
+  if(polling) clearInterval(polling);
+  polling=setInterval(tick,1000); tick();
+}
+function tick(){
+  fetch("/api/status").then(r=>r.json()).then(s=>{
+    const pct = s.total>0 ? Math.min(100,Math.round(s.done/s.total*100)) : 0;
+    $("#pfill").style.width=pct+"%"; $("#pctTxt").textContent=pct+"%";
+    $("#sDone").textContent=s.done.toLocaleString("it-IT");
+    $("#sTotal").textContent=s.total.toLocaleString("it-IT");
+    $("#sWith").textContent=s.with_email.toLocaleString("it-IT");
+    $("#sMail").textContent=s.emails.toLocaleString("it-IT");
+    // ETA
+    if(s.running && s.done>0 && s.total>0){
+      const rate=s.done/Math.max(1,s.elapsed);
+      const eta=Math.round((s.total-s.done)/Math.max(rate,.001));
+      $("#etaTxt").textContent="tempo stimato rimasto: "+fmtTime(eta);
+    }
+    // table
+    if(s.recent && s.recent.length){
+      $("#rows").innerHTML=s.recent.map(r=>
+        `<tr><td>${esc(r.sito)}</td><td class="em">${esc(r.email)}</td>
+          <td><span class="tag">${esc(r.stato||"")}</span></td></tr>`).join("");
+    }
+    $("#statusMsg").textContent = s.message||"";
+    if(!s.running && s.finished){
+      finish(s);
+    }
+  }).catch(()=>{});
+}
+function finish(s){
+  clearInterval(polling); polling=null;
+  $("#liveTag").classList.add("hidden");
+  $("#stopBtn").classList.add("hidden");
+  $("#pfill").classList.remove("anim");
+  $("#startBtn").disabled=false;
+  if(s.emails>0 || (s.recent&&s.recent.length)){
+    $("#dlBtn").classList.remove("hidden");
+  }
+  $("#resumeBtn").classList.remove("hidden");
+  if(s.error){ $("#optErr").textContent=s.error; $("#optErr").classList.remove("hidden"); }
+  toast("Scraping terminato: "+s.emails+" email trovate 🎉");
+}
+function esc(t){return (t||"").replace(/[&<>"]/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[c]));}
+
+// se ricarico la pagina mentre gira, riaggancia
+fetch("/api/status").then(r=>r.json()).then(s=>{
+  if(s.running){ uploaded=true; $("#progcard").classList.remove("hidden");
+    $("#liveTag").classList.remove("hidden"); $("#stopBtn").classList.remove("hidden");
+    $("#pfill").classList.add("anim"); startPolling(); }
+});
+</script>
+</body>
+</html>

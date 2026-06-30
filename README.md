@@ -15,11 +15,15 @@ con molte tecniche, per trovarne il più possibile:
 Salva tutto in un CSV con colonne `sito, email, stato` (lo `stato` dice con quale
 metodo è stata trovata: `statico`, `render`, `ocr`).
 
-> 🟢 **Vuoi usarlo dal browser, gratis e senza installare niente?**
-> Segui la **[GUIDA.md](GUIDA.md)**: carichi il CSV su GitHub, premi un pulsante
-> nella scheda *Actions*, e scarichi le email. Tutto online.
->
-> Il resto di questo file spiega invece come usarlo a riga di comando sul tuo PC.
+## Come usarlo — scegli un modo
+
+| Modo | Per chi | Guida |
+|------|---------|-------|
+| 🖥️ **App visiva** (interfaccia nel browser, trascini la lista e vedi l'avanzamento live) | Chi vuole un vero "software" sul proprio PC | **[GUIDA-APP.md](GUIDA-APP.md)** |
+| ☁️ **Online con GitHub Actions** (gira sui server di GitHub, niente installazioni) | Chi non vuole installare nulla | **[GUIDA.md](GUIDA.md)** |
+| ⌨️ **Riga di comando** (vedi sotto) | Chi è pratico di terminale | questo file |
+
+Il resto di questo file documenta l'uso a riga di comando.
 
 ## Installazione (una volta sola)
 
