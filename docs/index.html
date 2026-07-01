@@ -184,6 +184,22 @@
         </div>
       </div>
     </div>
+
+    <!-- STORICO -->
+    <div class="card" id="storicocard">
+      <div class="step" style="justify-content:space-between">
+        <span>🗂️ Storico degli scraping</span>
+        <button class="btn ghost" id="refreshStorico" style="padding:8px 14px;font-size:13px">⟳ Aggiorna</button>
+      </div>
+      <div class="tablewrap">
+        <table>
+          <thead><tr><th>Data e ora</th><th>Siti</th><th>Con email</th><th>Email</th><th>Scarica</th></tr></thead>
+          <tbody id="storicoRows"><tr><td colspan="5" class="muted" style="text-align:center;padding:20px">
+            Caricamento…</td></tr></tbody>
+        </table>
+      </div>
+      <div class="caps">Ogni giro completato viene salvato qui automaticamente.</div>
+    </div>
   </div>
 </div>
 <div class="toast" id="toast"></div>
@@ -234,6 +250,7 @@ async function connect(){
     $("#n0").classList.add("done"); $("#n0").textContent="✓";
     $("#app").classList.remove("hidden");
     checkRunningRun();
+    loadStorico();
   }catch(e){ showErr("#connErr","Impossibile contattare GitHub. Controlla la connessione."); $("#connState").textContent=""; }
 }
 function showErr(sel,msg){const e=$(sel);e.textContent=msg;e.classList.remove("hidden");}
@@ -330,8 +347,8 @@ async function findRun(){
     }
   }catch(e){}
 }
-async function readResultFile(path){
-  const r=await gh("/repos/"+OWNER+"/"+REPO+"/contents/"+path+"?ref="+RESULT_BRANCH+"&t="+Date.now());
+async function readBranchFile(path, branch){
+  const r=await gh("/repos/"+OWNER+"/"+REPO+"/contents/"+path+"?ref="+branch+"&t="+Date.now());
   if(!r.ok) return null;
   const meta=await r.json();
   if(meta.content && meta.encoding==="base64") return b64decode(meta.content);
@@ -341,6 +358,45 @@ async function readResultFile(path){
   const bd=await b.json();
   return b64decode(bd.content);
 }
+function readResultFile(path){ return readBranchFile(path, RESULT_BRANCH); }
+
+// ===== storico =====
+const STORICO_BRANCH = "storico";
+function fmtStamp(s){ // "20260630-142530" -> "30/06/2026 14:25"
+  const m=/^(\d{4})(\d{2})(\d{2})-(\d{2})(\d{2})/.exec(s||"");
+  if(!m) return s||"";
+  return `${m[3]}/${m[2]}/${m[1]} ${m[4]}:${m[5]}`;
+}
+async function loadStorico(){
+  const body=$("#storicoRows");
+  try{
+    const t=await readBranchFile("index.json", STORICO_BRANCH);
+    if(!t){ body.innerHTML='<tr><td colspan="5" class="muted" style="text-align:center;padding:20px">Nessuno scraping ancora archiviato.</td></tr>'; return; }
+    const list=JSON.parse(t);
+    if(!list.length){ body.innerHTML='<tr><td colspan="5" class="muted" style="text-align:center;padding:20px">Nessuno scraping ancora archiviato.</td></tr>'; return; }
+    body.innerHTML=list.map(e=>`<tr>
+      <td>${esc(fmtStamp(e.stamp))}</td>
+      <td>${(e.siti||0).toLocaleString("it-IT")}</td>
+      <td style="color:var(--ok)">${(e.con_email||0).toLocaleString("it-IT")}</td>
+      <td style="color:var(--accent)">${(e.email||0).toLocaleString("it-IT")}</td>
+      <td><button class="btn ok" style="padding:7px 12px;font-size:12px" data-file="${esc(e.file)}" data-stamp="${esc(e.stamp)}">⬇ CSV</button></td>
+    </tr>`).join("");
+    body.querySelectorAll("button[data-file]").forEach(b=>{
+      b.addEventListener("click",()=>downloadStorico(b.dataset.file, b.dataset.stamp));
+    });
+  }catch(e){
+    body.innerHTML='<tr><td colspan="5" class="muted" style="text-align:center;padding:20px">Storico non disponibile.</td></tr>';
+  }
+}
+async function downloadStorico(file, stamp){
+  toast("Preparo il file…");
+  const csv=await readBranchFile(file, STORICO_BRANCH);
+  if(!csv){ toast("File non disponibile."); return; }
+  const blob=new Blob([csv],{type:"text/csv;charset=utf-8"});
+  const a=document.createElement("a");
+  a.href=URL.createObjectURL(blob); a.download="emails-"+(stamp||"storico")+".csv"; a.click();
+}
+$("#refreshStorico").addEventListener("click",loadStorico);
 async function tick(){
   let prog=null;
   try{ const t=await readResultFile("progress.json"); if(t) prog=JSON.parse(t); }catch(e){}
@@ -390,6 +446,7 @@ function finish(prog){
   $("#dlBtn").classList.remove("hidden");
   $("#startBtn").disabled=false;
   toast("Scraping terminato!");
+  setTimeout(loadStorico, 8000);   // l'archivio storico appare dopo la chiusura del giro
 }
 $("#dlBtn").addEventListener("click",async()=>{
   toast("Preparo il file…");

@@ -178,3 +178,56 @@ jobs:
           path: emails.csv
           if-no-files-found: warn
           retention-days: 90
+
+      - name: Archivia il risultato nello storico
+        if: always()
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          # archivia il risultato di questo giro nel branch "storico"
+          [ -f emails.csv ] || exit 0
+          if [ "$(wc -l < emails.csv)" -le 1 ]; then exit 0; fi
+          STAMP=$(date -u +%Y%m%d-%H%M%S)
+          ARCH="$RUNNER_TEMP/arch"
+          REMOTE="https://x-access-token:${GITHUB_TOKEN}@github.com/${GITHUB_REPOSITORY}.git"
+          if git clone --quiet --branch storico "$REMOTE" "$ARCH" 2>/dev/null; then
+            :
+          else
+            mkdir -p "$ARCH"; cd "$ARCH"
+            git init -q; git remote add origin "$REMOTE"
+            git checkout -q --orphan storico
+            echo '[]' > index.json
+          fi
+          cd "$ARCH"
+          git config user.name "scraper-bot"
+          git config user.email "scraper-bot@users.noreply.github.com"
+          mkdir -p dati
+          cp -f "$GITHUB_WORKSPACE/emails.csv" "dati/$STAMP.csv"
+          python3 - "$STAMP" "${{ inputs.potenza || 'massima' }}" <<'PY'
+          import json, sys, csv, os
+          stamp, potenza = sys.argv[1], sys.argv[2]
+          idx = []
+          if os.path.exists("index.json"):
+              try: idx = json.load(open("index.json"))
+              except Exception: idx = []
+          sites=set(); we=set(); em=0
+          with open(f"dati/{stamp}.csv", encoding="utf-8", errors="replace") as f:
+              r=csv.reader(f); next(r, None)
+              for row in r:
+                  if not row: continue
+                  sites.add(row[0])
+                  if len(row) > 1 and row[1].strip():
+                      we.add(row[0]); em += 1
+          idx = [e for e in idx if e.get("stamp") != stamp]
+          idx.insert(0, {"stamp": stamp, "file": f"dati/{stamp}.csv",
+                         "siti": len(sites), "con_email": len(we), "email": em,
+                         "potenza": potenza})
+          json.dump(idx, open("index.json", "w"), ensure_ascii=False, indent=1)
+          PY
+          timeout 30 git add -A
+          timeout 30 git commit -q -m "storico $STAMP" || exit 0
+          for i in 1 2 3; do
+            timeout 60 git push -q origin storico && break
+            timeout 30 git pull -q --no-rebase -X ours origin storico 2>/dev/null || true
+            sleep 3
+          done
