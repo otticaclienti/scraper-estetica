@@ -29,6 +29,14 @@ on:
         description: "Timeout per pagina in secondi"
         required: true
         default: "15"
+      riprendi:
+        description: "Riprendere il giro precedente (si) o partire da zero (no)"
+        required: true
+        type: choice
+        default: "no"
+        options:
+          - "no"
+          - "si"
 
 permissions:
   contents: write   # serve per pubblicare progresso e risultati sul branch "risultati"
@@ -80,14 +88,16 @@ jobs:
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          # RIPRESA: se esiste gia' un emails.csv dei giri precedenti, lo
-          # riusiamo cosi' lo scraper salta i siti gia' fatti (resume).
-          if curl -fsSL "https://raw.githubusercontent.com/${GITHUB_REPOSITORY}/risultati/emails.csv" -o emails.csv 2>/dev/null \
+          # RIPRESA solo se richiesta esplicitamente (riprendi=si): riusa
+          # l'emails.csv del giro precedente per saltare i siti gia' fatti.
+          # Altrimenti si parte SEMPRE da zero (nessuna contaminazione tra liste).
+          if [ "${{ inputs.riprendi }}" = "si" ] \
+              && curl -fsSL "https://raw.githubusercontent.com/${GITHUB_REPOSITORY}/risultati/emails.csv" -o emails.csv 2>/dev/null \
               && [ "$(wc -l < emails.csv)" -gt 1 ]; then
-            echo "Riprendo: trovate $(($(wc -l < emails.csv) - 1)) righe gia' presenti."
+            echo "RIPRESA: trovate $(($(wc -l < emails.csv) - 1)) righe gia' presenti."
           else
             printf 'sito,email,stato\n' > emails.csv
-            echo "Nessun risultato precedente: parto da zero."
+            echo "Partenza da zero (lista pulita)."
           fi
 
           PUB="$RUNNER_TEMP/pub"

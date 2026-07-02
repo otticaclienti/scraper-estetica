@@ -145,8 +145,9 @@
           <div class="caps">Più alto = più veloce.</div>
         </div>
       </div>
-      <div style="margin-top:20px">
+      <div style="margin-top:20px;display:flex;gap:12px;flex-wrap:wrap;align-items:center">
         <button class="btn" id="startBtn" disabled>▶ Avvia scraping</button>
+        <button class="btn ghost" id="riprendiBtn" disabled title="Continua un giro interrotto sulla stessa lista, senza rifare i siti già fatti">⟳ Riprendi giro interrotto</button>
       </div>
       <div class="err hidden" id="startErr"></div>
     </div>
@@ -298,16 +299,20 @@ async function onFile(file){
     $("#uploaded").classList.remove("hidden");
     $("#n1").classList.add("done"); $("#n1").textContent="✓";
     $("#startBtn").disabled=false;
+    $("#riprendiBtn").disabled=false;
     toast("Caricati "+siteCount+" siti ✓");
   }catch(e){ showErr("#upErr","Errore di rete durante il caricamento."); }
 }
 
 // ===== avvio =====
-$("#startBtn").addEventListener("click",startRun);
-async function startRun(){
+$("#startBtn").addEventListener("click",()=>startRun("no"));
+const _riprendiBtn=document.getElementById("riprendiBtn");
+if(_riprendiBtn) _riprendiBtn.addEventListener("click",()=>startRun("si"));
+async function startRun(riprendi){
   $("#startErr").classList.add("hidden");
   $("#startBtn").disabled=true;
-  const inputs={ file_input:"siti.csv", potenza:power,
+  $("#riprendiBtn").disabled=true;
+  const inputs={ file_input:"siti.csv", potenza:power, riprendi:riprendi||"no",
     concurrency:String(parseInt($("#conc").value||"30")), max_pages:"8", timeout:"15" };
   try{
     const r=await gh("/repos/"+OWNER+"/"+REPO+"/actions/workflows/"+WORKFLOW_FILE+"/dispatches",
@@ -445,6 +450,7 @@ function finish(prog){
   $("#statusMsg").textContent="Completato: "+(prog.emails||0)+" email trovate 🎉";
   $("#dlBtn").classList.remove("hidden");
   $("#startBtn").disabled=false;
+  $("#riprendiBtn").disabled=false;
   toast("Scraping terminato!");
   setTimeout(loadStorico, 8000);   // l'archivio storico appare dopo la chiusura del giro
 }
