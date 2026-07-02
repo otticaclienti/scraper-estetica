@@ -171,6 +171,7 @@
       </div>
       <div class="row" style="align-items:center">
         <button class="btn ok hidden" id="dlBtn">⬇ Scarica emails.csv</button>
+        <button class="btn hidden" id="stopBtn" style="background:linear-gradient(135deg,#ff6b8b,#d63a63);box-shadow:0 8px 26px rgba(255,107,139,.35)">⛔ Ferma scraping</button>
         <span class="muted" id="statusMsg"></span>
         <span class="muted" id="runLink"></span>
       </div>
@@ -324,6 +325,7 @@ async function startRun(riprendi){
       $("#rows").innerHTML="";
       $("#dlBtn").classList.add("hidden");
       sawRunning=false;   // non considerare finito un risultato precedente
+      $("#stopBtn").classList.remove("hidden"); $("#stopBtn").disabled=false;
       $("#statusMsg").textContent="Avvio in corso… (può volerci qualche secondo)";
       $("#n2").classList.add("done"); $("#n2").textContent="✓";
       $("#progcard").scrollIntoView({behavior:"smooth"});
@@ -337,6 +339,33 @@ async function startRun(riprendi){
       $("#startBtn").disabled=false;
     }
   }catch(e){ showErr("#startErr","Errore di rete all'avvio."); $("#startBtn").disabled=false; }
+}
+
+// ===== ferma scraping =====
+$("#stopBtn").addEventListener("click",stopRun);
+async function stopRun(){
+  if(!confirm("Vuoi fermare lo scraping in corso?")) return;
+  $("#stopBtn").disabled=true;
+  toast("Fermo lo scraping…");
+  try{
+    let id=lastRunId;
+    const rr=await gh("/repos/"+OWNER+"/"+REPO+"/actions/runs?branch="+encodeURIComponent(REF)+"&status=in_progress&per_page=1");
+    if(rr.ok){ const d=await rr.json(); if(d.workflow_runs&&d.workflow_runs.length) id=d.workflow_runs[0].id; }
+    if(!id){ toast("Nessun giro in corso da fermare."); $("#stopBtn").disabled=false; return; }
+    const r=await gh("/repos/"+OWNER+"/"+REPO+"/actions/runs/"+id+"/cancel",{method:"POST"});
+    if(r.status===202){
+      toast("Stop inviato ✓");
+      $("#statusMsg").textContent="Interruzione in corso…";
+      if(poller){clearInterval(poller);poller=null;}
+      $("#liveTag").classList.add("hidden"); $("#pfill").classList.remove("anim");
+      $("#stopBtn").classList.add("hidden");
+      $("#startBtn").disabled=false; $("#riprendiBtn").disabled=false;
+    } else if(r.status===409){
+      toast("Il giro è già in chiusura."); $("#stopBtn").disabled=false;
+    } else {
+      toast("Stop non riuscito ("+r.status+")"); $("#stopBtn").disabled=false;
+    }
+  }catch(e){ toast("Errore di rete durante lo stop"); $("#stopBtn").disabled=false; }
 }
 
 // ===== polling avanzamento =====
@@ -449,6 +478,7 @@ function finish(prog){
   $("#pfill").style.width="100%"; $("#pctTxt").textContent="100%";
   $("#statusMsg").textContent="Completato: "+(prog.emails||0)+" email trovate 🎉";
   $("#dlBtn").classList.remove("hidden");
+  $("#stopBtn").classList.add("hidden");
   $("#startBtn").disabled=false;
   $("#riprendiBtn").disabled=false;
   toast("Scraping terminato!");
@@ -470,6 +500,7 @@ async function checkRunningRun(){
     const t=await readResultFile("progress.json");
     if(t){ const p=JSON.parse(t);
       if(p.running){ sawRunning=true; $("#progcard").classList.remove("hidden"); $("#liveTag").classList.remove("hidden");
+        $("#stopBtn").classList.remove("hidden"); $("#stopBtn").disabled=false;
         $("#pfill").classList.add("anim"); startPolling(); }
     }
   }catch(e){}
