@@ -217,7 +217,7 @@ let REF = "main";            // branch dove gira il workflow (rilevato all'avvio
 let TOKEN = localStorage.getItem("ghToken") || "";
 
 const $ = s => document.querySelector(s);
-let power="massima", csvText=null, csvName="", siteCount=0, poller=null, lastRunId=null, sawRunning=false;
+let power="massima", csvText=null, csvName="", siteCount=0, poller=null, lastRunId=null, sawRunning=false, tickN=0;
 
 function toast(m){const t=$("#toast");t.textContent=m;t.classList.add("show");setTimeout(()=>t.classList.remove("show"),2600);}
 function gh(path, opts={}){
@@ -449,7 +449,21 @@ async function tick(){
     $("#sMail").textContent=(prog.emails||0).toLocaleString("it-IT");
     if(prog.running && prog.done>0){ $("#statusMsg").textContent="Scraping in corso…"; }
     await refreshTable();
-    if(sawRunning && (prog.finished || prog.running===false)){ finish(prog); }
+    if(sawRunning && (prog.finished || prog.running===false)){ finish(prog); return; }
+    // anti-fantasma: se il progresso dice "in corso" ma su GitHub non c'e'
+    // nessun giro attivo, consideralo finito (evita blocchi tipo running eterno)
+    tickN++;
+    if(prog.running && sawRunning && tickN%6===0){
+      try{
+        const rr=await gh("/repos/"+OWNER+"/"+REPO+"/actions/runs?branch="+encodeURIComponent(REF)+"&status=in_progress&per_page=1");
+        if(rr.ok){ const d=await rr.json();
+          if(!d.workflow_runs || d.workflow_runs.length===0){
+            $("#statusMsg").textContent="Giro terminato.";
+            finish(Object.assign({}, prog, {running:false, finished:true}));
+          }
+        }
+      }catch(e){}
+    }
   } else {
     $("#statusMsg").textContent="In attesa che lo scraper parta sui server di GitHub…";
   }
