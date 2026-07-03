@@ -1,5 +1,13 @@
 [
  {
+  "stamp": "20260703-123706",
+  "file": "dati/20260703-123706.csv",
+  "siti": 3467,
+  "con_email": 1337,
+  "email": 1944,
+  "potenza": "massima"
+ },
+ {
   "stamp": "20260702-201637",
   "file": "dati/20260702-201637.csv",
   "siti": 4579,
